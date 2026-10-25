@@ -1,0 +1,66 @@
+{
+  // Copy this to `buka.jsonc` (this directory) or ~/.config/buka-ai/buka.jsonc
+  // and edit. Project-level config is merged over the global one.
+  //
+  // A bare `buka` already works with these environment variables:
+  //   OPENAI_API_KEY, OPENAI_BASE_URL
+
+  "$schema": "https://raw.githubusercontent.com/.buka/config.json",
+
+  // "provider/modelKey" — only the FIRST slash separates the two.
+  "model": "9router/davo",
+
+  "providers": {
+    "9router": {
+      "name": "9Router",
+      "type": "openai-compatible",
+      "baseURL": "http://127.0.0.1:20128/v1",
+      // Secrets support {env:VAR} and {file:/path/to/key}
+      "apiKey": "{env:BUKA_9ROUTER_KEY}",
+      // Pull the model list from the endpoint's /models instead of listing it.
+      "discover": true,
+      "models": {
+        "davo": {
+          // Wire id, when it differs from the key above.
+          "id": "Davo",
+          "name": "Davo (combo)",
+          "tools": true,
+          "reasoning": true,
+          "input": ["text", "image"],
+          "context": 1000000,
+          "output": 128000
+        }
+      }
+    },
+
+    "openai": {
+      "name": "OpenAI",
+      "type": "openai-compatible",
+      "baseURL": "https://api.openai.com/v1",
+      "apiKey": "{env:OPENAI_API_KEY}",
+      "discover": true,
+      "models": {}
+    }
+  },
+
+  // ask = prompt in the TUI · allow = run immediately · deny = refuse.
+  // A tool with no entry here defaults to "ask", never to "run unattended".
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "bash": "ask",
+    "write": "ask",
+    "edit": "ask"
+  },
+
+  "tui": {
+    "theme": "dark",
+    "showThinking": true,
+    "showTokenUsage": true
+  }
+
+  // "systemPrompt": "You are terse and always cite file paths.",
+  // "systemPromptFile": "./AGENTS.md"
+}
