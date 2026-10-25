@@ -12,6 +12,7 @@ import { renderToString } from "ink";
 
 import { Header, LineList, ModelPicker, PromptInput, StatusBar } from "../src/tui/components.js";
 import { markdownLines, messageToLines } from "../src/tui/blocks.js";
+import { assistant, text, thinking, tool } from "./helpers.js";
 import { editorRows, createEditor, insertText } from "../src/tui/editor.js";
 import { initialState, type AppState, type Line } from "../src/tui/types.js";
 import { stringWidth } from "../src/tui/text.js";
@@ -192,37 +193,41 @@ describe("model picker", () => {
 
 describe("message rendering fits the viewport", () => {
   it("keeps every rendered line inside the width, for all content kinds", () => {
-    const message = {
-      id: "1",
-      role: "assistant" as const,
-      text: [
-        "# Heading that is quite long and should wrap cleanly",
-        "",
-        "Prose with `inline code` and **bold** and *italic* text that goes on and on and on.",
-        "",
-        "- a bullet item that is long enough to need wrapping at narrow widths",
-        "  - nested deeper",
-        "",
-        "> a blockquote that also needs to wrap",
-        "",
-        "```ts",
-        "const veryLongIdentifier = someFunction(argumentOne, argumentTwo, argumentThree);",
-        "```",
-      ].join("\n"),
-      reasoning: "chain of thought that is hidden by default but must still fit when expanded",
-      streaming: true,
-      thinkingExpanded: true,
-      tools: [
-        {
+    const message = assistant(
+      [
+        thinking("chain of thought that is hidden by default but must still fit when expanded"),
+        text(
+          [
+            "# Heading that is quite long and should wrap cleanly",
+            "",
+            "Prose with `inline code` and **bold** and *italic* text that goes on and on and on.",
+            "",
+            "- a bullet item that is long enough to need wrapping at narrow widths",
+            "  - nested deeper",
+            "",
+            "> a blockquote that also needs to wrap",
+            "",
+            "```ts",
+            "const veryLongIdentifier = someFunction(argumentOne, argumentTwo, argumentThree);",
+            "```",
+            "",
+            "```diff",
+            "-removed line",
+            "+added line",
+            "```",
+          ].join("\n"),
+        ),
+        tool({
           id: "t1",
           name: "bash",
           preview: "a very long command preview that should be truncated",
-          status: "error" as const,
+          status: "error",
           output: `short\n${"z".repeat(300)}`,
           expanded: true,
-        },
+        }),
       ],
-    };
+      { streaming: true, thinkingExpanded: true },
+    );
 
     for (const width of [40, 60, 100]) {
       const lines = messageToLines(message, { width, showThinking: true });

@@ -20,7 +20,7 @@ import type { ToolRegistry } from "../agent/tools/registry.js";
 import type { PermissionRequest } from "../agent/tools/types.js";
 import type { ChatMessage, ToolCall } from "../provider/types.js";
 import type { Runtime } from "../runtime.js";
-import { SessionStore, type Session, type ToolResultRecord } from "../session/store.js";
+import { SessionStore, type Session, type StoredPart, type ToolResultRecord } from "../session/store.js";
 import { messagesToLines } from "./blocks.js";
 import {
   Banner,
@@ -47,7 +47,16 @@ import {
   type EditorState,
 } from "./editor.js";
 import { sessionToViews } from "./session-view.js";
-import { initialState, palette, reducer, type Action, type AppState } from "./types.js";
+import {
+  initialState,
+  messageReasoning,
+  messageText,
+  messageTools,
+  palette,
+  reducer,
+  type Action,
+  type AppState,
+} from "./types.js";
 
 export interface TuiOptions {
   runtime: Runtime;
@@ -237,13 +246,19 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       dispatch({ type: "status", status: "thinking" });
 
       // Accumulated for the session log; kept out of React state so the record
-      // is exactly what the stream produced, independent of render timing.
-      let text = "";
-      let reasoning = "";
+      // is exactly what the stream produced, independent of render timing. The
+      // part order mirrors the view so a resumed session replays identically.
       let model = activeModel.modelId;
       let error: string | undefined;
+      const parts: StoredPart[] = [];
       const toolCalls: ToolCall[] = [];
       const toolResults = new Map<string, ToolResultRecord>();
+
+      const appendPart = (kind: "text" | "thinking", delta: string): void => {
+        const last = parts[parts.length - 1];
+        if (last && last.kind === kind) last.text += delta;
+        else parts.push({ kind, text: delta });
+      };
 
       try {
         for await (const event of runAgent({
@@ -265,16 +280,17 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
               dispatch({ type: "model", model: event.model });
               break;
             case "reasoning":
-              reasoning += event.delta;
+              appendPart("thinking", event.delta);
               dispatch({ type: "reasoning", text: event.delta });
               break;
             case "text":
-              text += event.delta;
+              appendPart("text", event.delta);
               dispatch({ type: "delta", text: event.delta });
               dispatch({ type: "status", status: "responding" });
               break;
             case "tool_start":
               toolCalls.push(event.call);
+              parts.push({ kind: "tool", id: event.call.id });
               toolResults.set(event.call.id, {
                 id: event.call.id,
                 name: event.call.function.name,
@@ -331,8 +347,15 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
         abortRef.current = null;
         dispatch({ type: "done", reason: "complete" });
         active?.completeAssistant({
-          text,
-          reasoning,
+          parts,
+          text: parts
+            .filter((part) => part.kind === "text")
+            .map((part) => part.text)
+            .join("\n\n"),
+          reasoning: parts
+            .filter((part) => part.kind === "thinking")
+            .map((part) => part.text)
+            .join("\n"),
           model,
           toolCalls,
           toolResults: [...toolResults.values()],
@@ -481,14 +504,17 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   }, [systemPrompt]);
 
   /**
-   * Replaces the in-memory context with a model-written summary.
+   * Replaces the context with a model-written summary, and records the boundary
+   * in the session log — so resuming continues from the summary instead of
+   * reloading every turn.
    *
-   * The session log is left untouched — it is the append-only record of what
-   * actually happened, and rewriting history there would be a lie. Only the
-   * provider context for this process shrinks.
+   * The log itself is never rewritten: it stays the append-only record of what
+   * actually happened. Only what gets sent to the provider shrinks.
    */
   const compactContext = useCallback(async (): Promise<void> => {
     const history = messagesRef.current.filter((message) => message.role !== "system");
+    const active = ensureSession();
+    active.recordUser("/compact");
     dispatch({ type: "user", text: "/compact" });
     dispatch({ type: "assistant_start" });
 
@@ -548,17 +574,16 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       return;
     }
 
+    const cleaned = summary.trim();
+    dispatch({ type: "done", reason: "complete" });
+
+    active.compact(cleaned);
     messagesRef.current = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: `[Summary of the earlier conversation]\n${summary.trim()}` },
+      { role: "user", content: `[Summary of the earlier conversation]\n${cleaned}` },
     ];
-
-    dispatch({
-      type: "delta",
-      text: `\n\n— context compacted to ${summary.trim().length} chars. The full history stays in the session log.`,
-    });
-    dispatch({ type: "done", reason: "complete" });
-  }, [activeModel.modelId, activeModel.provider, cwd, systemPrompt]);
+    dispatch({ type: "compacted", summary: cleaned });
+  }, [activeModel.modelId, activeModel.provider, cwd, ensureSession, systemPrompt]);
 
   // ---------------------------------------------------------------------------
   // Submit + slash commands
@@ -681,7 +706,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     if (key.ctrl && input === "t") {
       const last = [...state.messages]
         .reverse()
-        .find((message) => message.role === "assistant" && message.reasoning.length > 0);
+        .find((message) => message.role === "assistant" && messageReasoning(message).length > 0);
       if (last) dispatch({ type: "toggle_thinking", id: last.id });
       return;
     }
@@ -689,9 +714,9 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     if (key.ctrl && input === "o") {
       const last = [...state.messages]
         .reverse()
-        .find((message) => message.tools.some((tool) => tool.output));
-      const tool = last?.tools.filter((candidate) => candidate.output).pop();
-      if (tool) dispatch({ type: "toggle_tool", id: tool.id });
+        .find((message) => messageTools(message).some((tool) => tool.output));
+      const tool = last ? messageTools(last).filter((candidate) => candidate.output).pop() : undefined;
+      if (last && tool) dispatch({ type: "toggle_tool", messageId: last.id, id: tool.id });
       return;
     }
 
@@ -1008,7 +1033,7 @@ function handleSlashCommand(raw: string, context: SlashContext): boolean {
         ? `# ${session.title}\n\n- session: \`${session.id}\`\n- updated: ${session.metaSnapshot.updatedAt}\n\n`
         : "";
       const body = context.state.messages
-        .map((message) => `## ${message.role}\n\n${message.text}\n`)
+        .map((message) => `## ${message.role}\n\n${messageText(message)}\n`)
         .join("\n");
       try {
         writeFileSync(target, header + body, "utf8");

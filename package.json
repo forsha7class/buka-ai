@@ -1,6 +1,6 @@
 {
   "name": "buka-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "buka ai — terminal-native AI coding agent (chat CLI ala opencode)",
   "type": "module",
   "bin": {
@@ -16,7 +16,7 @@
     "dev": "tsx src/cli.tsx",
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "tsx --test test/unit.test.ts test/tools.test.ts test/session.test.ts test/layout.test.ts test/loop.test.ts",
+    "test": "tsx --test test/unit.test.ts test/tools.test.ts test/session.test.ts test/layout.test.ts test/loop.test.ts test/highlight.test.ts",
     "test:smoke": "tsx test/tui-smoke.ts",
     "start": "node dist/cli.js"
   },

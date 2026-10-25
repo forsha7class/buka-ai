@@ -22,7 +22,7 @@ import { render } from "ink";
 import { createRuntime } from "../src/runtime.js";
 import { SessionStore } from "../src/session/store.js";
 import { App } from "../src/tui/app.js";
-import type { AppState } from "../src/tui/types.js";
+import { messageText, messageTools, type AppState } from "../src/tui/types.js";
 
 const ANSI = /\u001b\[[0-9;?]*[a-zA-Z]|\u001b\][^\u0007]*\u0007|\u001b[()][A-Z0-9]/g;
 /** Directory the agent works in. Defaults to this repo, which has plenty of .ts files. */
@@ -169,13 +169,14 @@ async function main(): Promise<number> {
     await delay(300);
     expect("answering dismisses the prompt", latest?.pendingPermission == null);
     const deniedTool = latest?.messages.some((message) =>
-      message.tools.some((tool) => tool.status === "error"),
+      messageTools(message).some((entry) => entry.status === "error"),
     );
     expect("the denial is recorded on the tool block", deniedTool === true);
 
     const finished = await waitFor(() => latest?.status === "idle", 120_000, "run to finish");
     expect("run returns to idle after the denial", finished);
-    expect("assistant still produced a reply", (lastMessage()?.text ?? "").length > 0);
+    const last = lastMessage();
+    expect("assistant still produced a reply", last ? messageText(last).length > 0 : false);
 
     // --- session persistence -------------------------------------------------
     await delay(300);
@@ -264,8 +265,22 @@ async function main(): Promise<number> {
     );
     expect("/compact summarises the context", compacted);
     expect(
-      "/compact actually replaced the context",
-      /context compacted to \d+ chars/.test(stdout.text()),
+      "/compact reports how much was folded away",
+      /\d+ chars summarised/.test(stdout.text()),
+    );
+
+    // The whole point of the persistent form: the boundary is on disk.
+    await delay(300);
+    const compactedFile = join(storeDir, `${sessions[0]?.id ?? "missing"}.jsonl`);
+    const compactedRaw = existsSync(compactedFile) ? readFileSync(compactedFile, "utf8") : "";
+    expect("the compaction boundary is persisted", compactedRaw.includes('"t":"compaction"'));
+    expect(
+      "the earlier turns are still in the log",
+      compactedRaw.includes('"t":"user"') && compactedRaw.includes('"t":"assistant"'),
+    );
+    expect(
+      "the part order is persisted for exact replay",
+      compactedRaw.includes('"parts"'),
     );
 
     // --- quit ---------------------------------------------------------------

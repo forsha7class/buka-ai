@@ -19,8 +19,9 @@ import {
   moveVertical,
   visualRows,
 } from "../src/tui/editor.js";
-import { reducer, initialState, type AppState } from "../src/tui/types.js";
+import { reducer, initialState, messageReasoning, messageText, messageTools, type AppState } from "../src/tui/types.js";
 import { markdownLines, messageToLines } from "../src/tui/blocks.js";
+import { assistant, compaction, text, thinking, tool } from "./helpers.js";
 import { getBool, getList, getString, parseArgs } from "../src/util/args.js";
 import { parseJsonc } from "../src/util/jsonc.js";
 import { extractFirstJsonObject } from "../src/util/http.js";
@@ -151,8 +152,42 @@ describe("reducer", () => {
     state = reducer(state, { type: "delta", text: "he" });
     state = reducer(state, { type: "delta", text: "llo" });
     state = reducer(state, { type: "reasoning", text: "think" });
-    assert.equal(state.messages[0]!.text, "hello");
-    assert.equal(state.messages[0]!.reasoning, "think");
+    const message = state.messages[0]!;
+    assert.equal(messageText(message), "hello");
+    assert.equal(messageReasoning(message), "think");
+    // A reasoning burst that arrives after text starts a new part rather than
+    // being merged into the text.
+    assert.deepEqual(
+      message.parts.map((part) => part.kind),
+      ["text", "thinking"],
+    );
+  });
+
+  it("keeps parts in the order the model produced them", () => {
+    let state = reducer(base(), { type: "assistant_start" });
+    state = reducer(state, { type: "reasoning", text: "why" });
+    state = reducer(state, { type: "delta", text: "let me look" });
+    state = reducer(state, { type: "tool_start", id: "c1", name: "bash", preview: "ls" });
+    state = reducer(state, { type: "tool_end", id: "c1", output: "ok", isError: false });
+    state = reducer(state, { type: "reasoning", text: "now I know" });
+    state = reducer(state, { type: "delta", text: "done" });
+
+    const message = state.messages[0]!;
+    assert.deepEqual(
+      message.parts.map((part) => part.kind),
+      ["thinking", "text", "tool", "thinking", "text"],
+      "grouping by kind would reorder the work",
+    );
+    assert.equal(messageText(message), "let me look\n\ndone");
+    assert.equal(messageReasoning(message), "why\nnow I know");
+    assert.equal(messageTools(message).length, 1);
+  });
+
+  it("ignores empty deltas so parts do not multiply", () => {
+    let state = reducer(base(), { type: "assistant_start" });
+    state = reducer(state, { type: "delta", text: "" });
+    state = reducer(state, { type: "delta", text: "" });
+    assert.equal(state.messages[0]!.parts.length, 0);
   });
 
   it("clears streaming on done", () => {
@@ -216,12 +251,48 @@ describe("reducer", () => {
   it("records tool lifecycle", () => {
     let state = reducer(base(), { type: "assistant_start" });
     state = reducer(state, { type: "tool_start", id: "1", name: "bash", preview: "ls" });
-    assert.equal(state.messages[0]!.tools[0]!.status, "running");
-    state = reducer(state, { type: "tool_end", id: "1", output: "ok", isError: false, summary: "1 line" });
-    assert.equal(state.messages[0]!.tools[0]!.status, "done");
-    assert.equal(state.messages[0]!.tools[0]!.summary, "1 line");
+    assert.equal(messageTools(state.messages[0]!)[0]!.status, "running");
+
+    state = reducer(state, {
+      type: "tool_end",
+      id: "1",
+      output: "ok",
+      isError: false,
+      summary: "1 line",
+    });
+    assert.equal(messageTools(state.messages[0]!)[0]!.status, "done");
+    assert.equal(messageTools(state.messages[0]!)[0]!.summary, "1 line");
+
     state = reducer(state, { type: "tool_end", id: "1", output: "bad", isError: true });
-    assert.equal(state.messages[0]!.tools[0]!.status, "error");
+    assert.equal(messageTools(state.messages[0]!)[0]!.status, "error");
+  });
+
+  it("toggles a tool only inside its own message", () => {
+    let state = reducer(base(), { type: "assistant_start" });
+    state = reducer(state, { type: "tool_start", id: "same", name: "bash", preview: "ls" });
+    state = reducer(state, { type: "tool_end", id: "same", output: "one", isError: false });
+    const firstId = state.messages[0]!.id;
+
+    state = reducer(state, { type: "assistant_start" });
+    state = reducer(state, { type: "tool_start", id: "same", name: "bash", preview: "ls" });
+    state = reducer(state, { type: "tool_end", id: "same", output: "two", isError: false });
+
+    state = reducer(state, { type: "toggle_tool", messageId: firstId, id: "same" });
+
+    assert.equal(messageTools(state.messages[0]!)[0]!.expanded, true);
+    assert.equal(
+      messageTools(state.messages[1]!)[0]!.expanded,
+      false,
+      "a repeated tool id in another message must not be affected",
+    );
+  });
+
+  it("appends a compaction marker as its own message", () => {
+    let state = reducer(base(), { type: "user", text: "hi" });
+    state = reducer(state, { type: "compacted", summary: "did some things" });
+    assert.equal(state.messages.length, 2);
+    assert.equal(state.messages[1]!.role, "compact");
+    assert.equal(messageText(state.messages[1]!), "did some things");
   });
 
   it("resets the transcript but keeps the model", () => {
@@ -264,63 +335,77 @@ describe("markdown rendering", () => {
 });
 
 describe("message rendering", () => {
+  const opts = { width: 60, showThinking: true };
+
   it("labels the roles and keeps every line within the width", () => {
-    const lines = messageToLines(
-      {
-        id: "1",
-        role: "assistant",
-        text: "x".repeat(200),
-        reasoning: "",
-        streaming: false,
-        thinkingExpanded: false,
-        tools: [],
-      },
-      { width: 40, showThinking: true },
-    );
+    const lines = messageToLines(assistant([text("x".repeat(200))]), { width: 40, showThinking: true });
     const rendered = plain(lines);
     assert.ok(rendered[0]!.includes("buka"));
     for (const line of rendered) assert.ok(stringWidth(line) <= 40, `too wide: ${line}`);
   });
 
+  it("renders parts in order, interleaving text and tools", () => {
+    const rendered = plain(
+      messageToLines(
+        assistant([
+          thinking("I should look at what files exist before deciding anything."),
+          text("let me look"),
+          tool({ id: "c1", name: "bash", preview: "ls", output: "a\nb" }),
+          text("all done"),
+        ]),
+        opts,
+      ),
+    );
+
+    const thinkingIndex = rendered.findIndex((line) => line.includes("thinking"));
+    const firstText = rendered.findIndex((line) => line.includes("let me look"));
+    const toolIndex = rendered.findIndex((line) => line.includes("bash"));
+    const secondText = rendered.findIndex((line) => line.includes("all done"));
+
+    assert.ok(thinkingIndex >= 0 && firstText >= 0 && toolIndex >= 0 && secondText >= 0);
+    assert.ok(
+      thinkingIndex < firstText && firstText < toolIndex && toolIndex < secondText,
+      `expected chronological order, got ${JSON.stringify({ thinkingIndex, firstText, toolIndex, secondText })}`,
+    );
+  });
+
   it("hides thinking unless expanded", () => {
-    const message = {
-      id: "1",
-      role: "assistant" as const,
-      text: "answer",
-      reasoning: "secret chain of thought",
-      streaming: false,
-      thinkingExpanded: false,
-      tools: [],
-    };
-    const collapsed = plain(messageToLines(message, { width: 60, showThinking: true }));
-    assert.ok(!collapsed.some((line) => line.includes("secret chain")));
+    const secret = "The route replies 200 even when the store returns undefined, so the fix belongs in the store.";
+    const message = assistant([thinking(secret), text("answer")]);
+    const collapsed = plain(messageToLines(message, opts));
+    assert.ok(!collapsed.some((line) => line.includes("The route replies")));
     assert.ok(collapsed.some((line) => line.includes("thinking")));
 
-    const expanded = plain(
-      messageToLines({ ...message, thinkingExpanded: true }, { width: 60, showThinking: true }),
+    const expanded = plain(messageToLines({ ...message, thinkingExpanded: true }, opts));
+    assert.ok(expanded.some((line) => line.includes("The route replies")));
+  });
+
+  it("elides throwaway thinking bursts but keeps substantial ones", () => {
+    const short = assistant([thinking("checking the file"), text("answer")]);
+    const shortRendered = plain(messageToLines(short, opts));
+    assert.ok(
+      !shortRendered.some((line) => line.includes("thinking")),
+      "a 17-char burst is noise, not a transcript entry",
     );
-    assert.ok(expanded.some((line) => line.includes("secret chain")));
+
+    const long = assistant([
+      thinking(
+        "The route always replies 200, so I need to make the store throw and let the handler translate that into a 404.",
+      ),
+      text("answer"),
+    ]);
+    assert.ok(plain(messageToLines(long, opts)).some((line) => line.includes("thinking")));
   });
 
   it("hides tool output until expanded and hints at the keybinding", () => {
     const output = Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n");
-    const message = {
-      id: "1",
-      role: "assistant" as const,
-      text: "",
-      reasoning: "",
-      streaming: false,
-      thinkingExpanded: false,
-      tools: [
-        { id: "t", name: "bash", preview: "ls", status: "done" as const, output, expanded: false },
-      ],
-    };
-    const collapsed = plain(messageToLines(message, { width: 60, showThinking: true }));
+    const collapsedMessage = assistant([tool({ id: "t", name: "bash", output, expanded: false })]);
+    const collapsed = plain(messageToLines(collapsedMessage, opts));
     assert.ok(!collapsed.some((line) => line.includes("line 0")), "output stays collapsed");
     assert.ok(collapsed.some((line) => line.includes("ctrl+o")), "expansion is advertised");
 
-    message.tools[0]!.expanded = true;
-    const expanded = plain(messageToLines(message, { width: 60, showThinking: true }));
+    const expandedMessage = assistant([tool({ id: "t", name: "bash", output, expanded: true })]);
+    const expanded = plain(messageToLines(expandedMessage, opts));
     assert.ok(expanded.some((line) => line.includes("line 0")));
     assert.ok(expanded.some((line) => line.includes("line 29")), "nothing is truncated when expanded");
   });
@@ -328,24 +413,37 @@ describe("message rendering", () => {
   it("shows a truncated preview for failed tools", () => {
     const output = Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n");
     const lines = plain(
-      messageToLines(
-        {
-          id: "1",
-          role: "assistant",
-          text: "",
-          reasoning: "",
-          streaming: false,
-          thinkingExpanded: false,
-          tools: [
-            { id: "t", name: "bash", preview: "ls", status: "error", output, expanded: false },
-          ],
-        },
-        { width: 60, showThinking: true },
-      ),
+      messageToLines(assistant([tool({ id: "t", name: "bash", output, status: "error" })]), opts),
     );
     assert.ok(lines.some((line) => line.includes("line 0")), "errors are never hidden");
     assert.ok(lines.some((line) => line.includes("more lines")), "but are truncated");
     assert.ok(!lines.some((line) => line.includes("line 29")));
+  });
+
+  it("draws a cursor when a streaming turn has no text yet", () => {
+    const rendered = plain(messageToLines(assistant([], { streaming: true }), opts));
+    assert.ok(rendered.some((line) => line.includes("▌")));
+  });
+
+  it("renders a compaction as a divider with the summary", () => {
+    const summary = "Refactored auth and added tests.";
+    const rendered = plain(messageToLines(compaction(summary), opts));
+    assert.ok(rendered.some((line) => line.includes("context compacted")));
+    assert.ok(rendered.some((line) => line.includes("Refactored auth")));
+    assert.ok(
+      rendered.some((line) => line.includes(`${summary.length} chars summarised`)),
+      "the divider reports how much was folded away",
+    );
+  });
+
+  it("strips markdown markers from the compaction preview", () => {
+    const rendered = plain(
+      messageToLines(compaction("## Findings\n- one\n* two\n### Detail"), opts),
+    );
+    assert.ok(!rendered.some((line) => line.includes("##")), "no raw heading markers");
+    assert.ok(rendered.some((line) => line.includes("Findings")));
+    assert.ok(rendered.some((line) => line.includes("• one")));
+    assert.ok(rendered.some((line) => line.includes("• two")));
   });
 });
 

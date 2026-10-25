@@ -6,41 +6,45 @@
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-144%20passing-3fb950)](#testing)
-[![TUI checks](https://img.shields.io/badge/TUI%20checks-28%20passing-3fb950)](#testing)
+[![Tests](https://img.shields.io/badge/tests-184%20passing-3fb950)](#testing)
+[![TUI checks](https://img.shields.io/badge/TUI%20checks-31%20passing-3fb950)](#testing)
 [![Provider SDK](https://img.shields.io/badge/provider%20SDK-none-8b5cf6)](#design-notes)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 
 </div>
 
 ```
- buka ai  9router/Davo · deepseek-v4.1-flash  20.4k tok (16.5k cached)                      ● ready
+ buka ai  9router/Davo · deepseek-v4.1-flash  22.3k tok (17.7k cached)                      ● ready
 ▸ you
-  Test-nya gagal. Cari penyebabnya, perbaiki, terus jalanin test lagi buat buktiin. Ringkas aja.
+  Test-nya gagal. Cari penyebabnya, perbaiki, tunjukin diff-nya, terus jalanin test lagi. Ringkas
+  aja.
 
 ◂ buka  deepseek-v4.1-flash
-  ✻ thinking  1643 chars  (ctrl+t to show)
-  Cause: findUser returns undefined for unknown ids instead of signaling not-found, so
-  assert.throws sees no exception.
-
-  Beres. 2/2 pass.
-
-  Penyebab: findUser() di src/lib/store.js cuma USERS.get(id), jadi id tak dikenal balik
-  undefined — nggak ada exception yang bisa ditangkap assert.throws.
-
-  Perbaikan:
-  • findUser() sekarang throw Error("user <id> not found") kalau user nggak ada.
-  • handleUsers() di src/routes/users.js nangkep error itu dan balas HTTP 404 JSON, biar
-    perilaku API-nya tetap benar (sebelumnya bakal kirim 200 dengan body kosong).
-  ⚙ bash  ls -la ✓  exit code 0  (ctrl+o)
-  ⚙ bash  cat package.json 2>/dev/null || ls ✓  exit code 0  (ctrl+o)
-  ⚙ bash  find src test -type f | head -50; echo ---; cat README.md ✓  exit code 0  (ctrl+o)
-  ⚙ bash  npm test 2>&1 | tail -40 ✓  exit code 0  (ctrl+o)
-  ⚙ read  test/users.test.js ✓  11 of 11 lines  (ctrl+o)
-  ⚙ read  src/routes/users.js ✓  8 of 8 lines  (ctrl+o)
+  ✻ thinking  139 chars  (ctrl+t to show)
+  ⚙ bash  ls -la && git status --short && git log --oneline -5 ✓  exit code 0  (ctrl+o)
+  ⚙ glob  **/* ✓  10 files  (ctrl+o)
+  ⚙ read  package.json ✓  5 of 5 lines  (ctrl+o)
   ⚙ read  src/lib/store.js ✓  8 of 8 lines  (ctrl+o)
+  ⚙ read  src/routes/users.js ✓  8 of 8 lines  (ctrl+o)
   ⚙ read  src/server.js ✓  9 of 9 lines  (ctrl+o)
+  ⚙ read  test/users.test.js ✓  11 of 11 lines  (ctrl+o)
+  ⚙ read  README.md ✓  3 of 3 lines  (ctrl+o)
+  ⚙ bash  npm test 2>&1 | tail -40 ✓  exit code 0  (ctrl+o)
+  ✻ thinking  705 chars  (ctrl+t to show)
+  ⚙ bash  grep -rn "findUser" src test ✓  exit code 0  (ctrl+o)
+  ✻ thinking  2390 chars  (ctrl+t to show)
+  Penyebabnya: findUser mengembalikan undefined untuk id yang tidak ada, sedangkan test
+  menuntut error /not found/. Route /users/:id juga ikut salah — untuk user hilang ia balas
+  200 dengan body kosong (JSON.stringify(undefined)).
   ⚙ edit  src/lib/store.js ✓  1 replacement  (ctrl+o)
+  ⚙ edit  src/routes/users.js ✓  1 replacement  (ctrl+o)
+  ⚙ bash  git diff && echo "=== TEST ===" && npm test 2>&1 | tail -15 ✓  exit code 0  (ctrl+o)
+
+
+  Beres. 2/2 test lulus.
+
+  Penyebab: findUser balikin undefined untuk id tak dikenal, bukan melempar error — jadi
+  assert.throws gagal.
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ask buka to do something, or /help
 Enter send · Alt+Enter newline · Ctrl+P sessions · /help                                     turn 7
@@ -76,11 +80,25 @@ expandable tool output. The transcript is rendered as a list of pre-wrapped
 lines that the viewport slices, so scrolling is exact and the layout never
 drifts — `test/layout.test.ts` asserts that no row can ever wrap or overflow.
 
+**A message is an ordered list of parts**
+
+Not "some text plus a list of tools". One request can span many provider turns:
+the model thinks, writes a sentence, calls a tool, thinks again, writes more.
+Parts are kept in the order they happened and rendered that way, so the
+transcript reads the way the work actually went.
+
 **Streaming that shows its work**
 
 Tokens appear as they arrive. Chain-of-thought (`reasoning_content`) is captured
 separately and shown as a collapsed block you can open with `Ctrl+T`, instead of
 being dumped into the answer.
+
+**Syntax highlighting, without a megabyte of grammars**
+
+Fenced code is highlighted by a hand-written, stateful scanner: correct string
+and comment handling, block comments and template literals that carry across
+lines, `$vars` highlighted inside shell quotes, diff hunks coloured by line.
+Unknown languages are left plain rather than guessed at.
 
 **Seven tools, a real agent loop**
 
@@ -98,8 +116,15 @@ silent failure.
 **Sessions that survive the process**
 
 Append-only JSONL under `~/.local/share/buka-ai/sessions/`. Resume from a
-different process and the conversation continues — tool calls and results
-included, in the exact shape the provider expects.
+different process and the conversation continues — tool calls, results and part
+order included, in the exact shape the provider expects.
+
+**Compaction that persists**
+
+`/compact` asks the model to summarise the conversation and records the boundary
+in the log. Resuming continues from the summary instead of reloading every turn.
+The log itself is never rewritten — it stays the record of what actually
+happened.
 
 **Multi-provider, discovered**
 
@@ -266,9 +291,11 @@ src/
 ├─ tui/
 │  ├─ app.tsx               root component, keybindings, agent pump
 │  ├─ blocks.ts             message → styled display lines
+│  ├─ highlight.ts          stateful syntax scanner (no dependency)
 │  ├─ text.ts               cell-accurate measurement and wrapping
 │  ├─ editor.ts             pure text-editing operations
-│  ├─ types.ts              state + reducer
+│  ├─ session-view.ts       stored records → display parts
+│  ├─ types.ts              state + reducer + ordered message parts
 │  └─ components.tsx        header, input, status bar, pickers
 └─ util/                    SSE parser, JSONC, args, theme, http
 ```
@@ -346,16 +373,34 @@ resumes. The sort falls back to `createdAt` and then `id`.
 
 **`/compact` shrinks the context, not the record.**
 The session log is the append-only truth of what happened. Rewriting it to
-summarise would be a lie, so compaction only replaces what is sent to the
-provider for the current process.
+summarise would be a lie, so compaction records a boundary instead:
+`toChatMessages()` starts from the most recent boundary, so resuming continues
+from the summary. The full history stays on disk, and the message count still
+reflects the real turns.
+
+**Ordered parts, because grouping lies.**
+The first version stored a message as `{ text, tools[] }` and rendered all the
+text followed by all the tools. A real run reads "thinking → sentence → tool →
+more thinking → answer", so that layout silently reordered the work. Messages now
+hold an ordered `parts` array, and the session log stores the same order so a
+resumed transcript replays identically.
+
+**A highlighter worth its weight.**
+`highlight.js`/`shiki` mean megabytes of grammars and startup cost for a CLI that
+mostly prints fragments of JavaScript and shell. The scanner here is a few hundred
+lines with no dependency: it carries state across lines (block comments, template
+literals, triple-quoted strings), highlights `$vars` inside shell double quotes,
+and colours diff hunks by line. It refuses to guess — an unknown language renders
+plain rather than mangled. The one invariant that really matters is asserted
+directly: highlighting never adds, drops or reorders a single character.
 
 ---
 
 ## Testing
 
 ```bash
-npm test              # 144 unit + integration tests, no network required
-npm run test:smoke    # 28 end-to-end TUI checks (needs a live provider)
+npm test              # 184 unit + integration tests, no network required
+npm run test:smoke    # 31 end-to-end TUI checks (needs a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
 
@@ -363,22 +408,29 @@ The full suite, a build, and a real agent run through the compiled binary were
 all verified on **Node 22.23.4 and Node 24.22.1** — the `>= 22` requirement is
 tested, not assumed.
 
-**144 tests** cover the pure and near-pure layers: text measurement and wrapping,
-the input editor, the reducer, markdown rendering, argument parsing, JSONC,
-config merging, secret resolution, all seven tools against a real temp
-filesystem, the session store, provider protocol decoding, and **layout
-invariants** (asserting no rendered row can ever exceed the terminal width).
+**184 tests** cover the pure and near-pure layers: text measurement and wrapping,
+the input editor, the reducer, markdown rendering, the syntax highlighter,
+argument parsing, JSONC, config merging, secret resolution, all seven tools
+against a real temp filesystem, the session store, provider protocol decoding,
+and **layout invariants** (asserting no rendered row can ever exceed the terminal
+width).
 
 **The agent loop is tested directly.** `test/loop.test.ts` drives `runAgent`
 with a scripted fake provider, so multi-turn tool chaining, permission modes,
 the turn ceiling, aborts, malformed tool arguments and provider failures are all
 deterministic and instant — no model, no network.
 
-**28 end-to-end TUI checks** run the real `<App />` on a fake TTY (a
+**The highlighter is tested by its invariants**, not by golden output: a corpus
+in every supported language must round-trip character-for-character, malformed
+input must never throw, block comments and template literals must carry across
+lines, and a `//` inside a string must not become a comment.
+
+**31 end-to-end TUI checks** run the real `<App />` on a fake TTY (a
 `PassThrough` for stdin, a capturing `Writable` for stdout) and assert against
 the component's committed state rather than scraping ANSI output. They cover the
 permission prompt and denial path, session persistence to disk, scrolling,
-both pickers opening *and closing*, `/compact`, and quitting.
+both pickers opening *and closing*, `/compact` including its persistence to the
+log, and quitting.
 
 There are also two debug probes kept around because they earn their place:
 `npx tsx test/debug-keys.ts` (does this keybinding reach the app?) and
@@ -426,15 +478,14 @@ export const myTool: Tool = {
 
 Honest list, not a wishlist:
 
-- **Markdown is deliberately minimal** — fenced code, headings, bullets,
-  blockquotes, inline code/bold/italic. No tables or links.
-- **No syntax highlighting** inside code blocks yet.
-- **Text and tool calls are not interleaved.** A multi-turn run shows all of its
-  text, then its tool blocks. Tool order among themselves is preserved.
+- **Markdown is deliberately minimal** — fenced code (highlighted), headings,
+  bullets, blockquotes, inline code/bold/italic. No tables, links or nested lists.
+- **The highlighter covers a fixed language set** — JS/TS, JSON, Python, shell,
+  YAML and diff. Other languages render plain rather than being guessed at.
+- **Transient tool output is not highlighted** — only fenced code in the answer
+  is. Tool output is shown verbatim so you see exactly what the command printed.
 - **`grep` uses `rg` when available**, and falls back to a JS walker otherwise
   (slower; skips files over 4 MB and build/vendor directories).
-- **`/compact` shrinks in-memory context only** — resuming a session reloads the
-  full history.
 - **One transport: `openai-compatible`.** No native Anthropic Messages API, no
   OAuth flows.
 - **Images/PDFs are typed but not plumbed** from the TUI into requests.

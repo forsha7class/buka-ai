@@ -158,3 +158,20 @@ export function padToWidth(text: string, width: number): string {
   const current = stringWidth(text);
   return current >= width ? text : text + " ".repeat(width - current);
 }
+
+/**
+ * Longest prefix of `text` that fits in `maxCells` cells.
+ * Used to wrap styled tokens without splitting a wide character in half.
+ */
+export function takeWidth(text: string, maxCells: number): string {
+  if (maxCells <= 0) return "";
+  let used = 0;
+  let end = 0;
+  for (const char of text) {
+    const charCells = charWidth(char);
+    if (used + charCells > maxCells) break;
+    used += charCells;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}

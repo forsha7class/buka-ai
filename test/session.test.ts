@@ -17,14 +17,18 @@ function asAssistant(record: unknown): AssistantRecord {
   return value;
 }
 
-/** Rewrites a session's metadata timestamp, so ordering tests are deterministic. */
-function pinUpdatedAt(id: string, iso: string): void {
+/** Rewrites session metadata fields, so ordering tests are deterministic. */
+function pinMeta(id: string, patch: Record<string, string>): void {
   const path = join(dir, `${id}.jsonl`);
   const lines = readFileSync(path, "utf8").trimEnd().split("\n");
   const meta = JSON.parse(lines[0]!) as Record<string, unknown>;
-  meta["updatedAt"] = iso;
+  Object.assign(meta, patch);
   lines[0] = JSON.stringify(meta);
   writeFileSync(path, `${lines.join("\n")}\n`, "utf8");
+}
+
+function pinUpdatedAt(id: string, iso: string): void {
+  pinMeta(id, { updatedAt: iso });
 }
 
 /** An ISO timestamp `days` ahead of now, so ordering never depends on today's date. */
@@ -195,9 +199,11 @@ describe("session store", () => {
     const second = store.create({ cwd: "/tie", modelRef: "p/m", model: "M" });
     first.recordUser("one");
     second.recordUser("two");
+
+    // Both timestamps pinned identically, so only the id can order them.
     const stamp = futureIso(3);
-    pinUpdatedAt(first.id, stamp);
-    pinUpdatedAt(second.id, stamp);
+    pinMeta(first.id, { updatedAt: stamp, createdAt: stamp });
+    pinMeta(second.id, { updatedAt: stamp, createdAt: stamp });
 
     const ids = store.list().map((summary) => summary.id);
     const expected = [first.id, second.id].sort((a, b) => b.localeCompare(a));
@@ -243,6 +249,131 @@ describe("session store", () => {
     session.setModel("other/model", "OtherModel");
     assert.equal(store.load(session.id).metaSnapshot.modelRef, "other/model");
     assert.equal(store.load(session.id).metaSnapshot.model, "OtherModel");
+  });
+
+  it("stores the ordered part list and rebuilds it", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    session.recordUser("go");
+    session.completeAssistant({
+      text: "first",
+      reasoning: "hmm",
+      model: "M",
+      toolCalls: [],
+      toolResults: [],
+      parts: [
+        { kind: "thinking", text: "hmm" },
+        { kind: "text", text: "first" },
+        { kind: "tool", id: "c1" },
+        { kind: "text", text: "second" },
+      ],
+    });
+
+    const loaded = store.load(session.id);
+    const assistant = loaded.records[1]!;
+    assert.equal(assistant.t, "assistant");
+    const parts = assistant.t === "assistant" ? assistant.parts : undefined;
+    assert.deepEqual(parts, [
+      { kind: "thinking", text: "hmm" },
+      { kind: "text", text: "first" },
+      { kind: "tool", id: "c1" },
+      { kind: "text", text: "second" },
+    ]);
+  });
+});
+
+describe("compaction", () => {
+  function seed(session: ReturnType<SessionStore["create"]>): void {
+    session.recordUser("first question");
+    session.completeAssistant({
+      text: "first answer",
+      reasoning: "",
+      model: "M",
+      toolCalls: [],
+      toolResults: [],
+    });
+  }
+
+  it("replaces earlier turns with the summary in the provider context", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    seed(session);
+    assert.equal(session.toChatMessages().length, 2, "before compaction");
+
+    session.compact("the user asked one question");
+
+    const messages = session.toChatMessages();
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0]!.role, "user");
+    assert.match(String(messages[0]!.content), /\[Summary of the earlier conversation\]/);
+    assert.match(String(messages[0]!.content), /the user asked one question/);
+    assert.ok(
+      !messages.some((message) => message.content === "first answer"),
+      "the replaced turn is gone from the context",
+    );
+  });
+
+  it("survives a reload — this is what makes /compact persistent", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    seed(session);
+    session.compact("folded away");
+    session.recordUser("second question");
+
+    const reloaded = store.load(session.id);
+    const messages = reloaded.toChatMessages();
+    assert.equal(messages.length, 2, "summary plus the new question");
+    assert.match(String(messages[0]!.content), /folded away/);
+    assert.equal(messages[1]!.content, "second question");
+  });
+
+  it("keeps the full history on disk while shrinking the context", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    seed(session);
+    session.compact("summary text");
+
+    const raw = readFileSync(join(dir, `${session.id}.jsonl`), "utf8");
+    assert.ok(raw.includes("first question"), "the log is not rewritten");
+    assert.ok(raw.includes("first answer"));
+    assert.ok(raw.includes('"t":"compaction"'));
+
+    const summary = store.list().find((entry) => entry.id === session.id)!;
+    assert.equal(summary.compactions, 1);
+    assert.equal(summary.messages, 2, "message count still reflects the real turns");
+  });
+
+  it("honours only the most recent compaction", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    seed(session);
+    session.compact("first summary");
+    session.recordUser("middle question");
+    session.compact("second summary");
+    session.recordUser("last question");
+
+    const messages = session.toChatMessages();
+    assert.match(String(messages[0]!.content), /second summary/);
+    assert.ok(!messages.some((message) => message.content === "first summary"));
+    assert.equal(messages.at(-1)!.content, "last question");
+  });
+
+  it("keeps tool results after a compaction boundary", () => {
+    const session = store.create({ cwd: "/work", modelRef: "p/m", model: "M" });
+    seed(session);
+    session.compact("summary");
+    session.recordUser("now list files");
+    session.completeAssistant({
+      text: "",
+      reasoning: "",
+      model: "M",
+      toolCalls: [
+        { id: "c9", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
+      ],
+      toolResults: [{ id: "c9", name: "bash", preview: "ls", output: "a.txt", isError: false }],
+    });
+
+    const messages = session.toChatMessages();
+    assert.deepEqual(
+      messages.map((message) => message.role),
+      ["user", "user", "assistant", "tool"],
+    );
+    assert.equal(messages[3]!.tool_call_id, "c9");
   });
 });
 

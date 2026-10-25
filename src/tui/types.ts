@@ -30,17 +30,53 @@ export interface ToolView {
   expanded: boolean;
 }
 
+/**
+ * A message is an ordered list of parts, not "some text plus a list of tools".
+ *
+ * A single user request can span many provider turns: the model thinks, writes a
+ * sentence, calls a tool, thinks again, writes more. Interleaving is the only way
+ * to render that truthfully — grouping text and tools separately silently
+ * reorders the work.
+ */
+export type MessagePart =
+  | { kind: "thinking"; text: string }
+  | { kind: "text"; text: string }
+  | { kind: "tool"; tool: ToolView };
+
+export type MessageRole = "user" | "assistant" | "compact";
+
 export interface MessageView {
   id: string;
-  role: "user" | "assistant";
-  text: string;
-  reasoning: string;
+  role: MessageRole;
+  parts: MessagePart[];
   streaming: boolean;
+  /** Applies to every thinking part in this message. */
   thinkingExpanded: boolean;
-  tools: ToolView[];
   error?: string;
   /** Upstream model that actually served this turn (may differ from the request). */
   model?: string;
+}
+
+/** Concatenated prose of a message, ignoring tools and thinking. */
+export function messageText(message: MessageView): string {
+  return message.parts
+    .filter((part): part is Extract<MessagePart, { kind: "text" }> => part.kind === "text")
+    .map((part) => part.text)
+    .join("\n\n");
+}
+
+/** Concatenated chain-of-thought of a message. */
+export function messageReasoning(message: MessageView): string {
+  return message.parts
+    .filter((part): part is Extract<MessagePart, { kind: "thinking" }> => part.kind === "thinking")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+export function messageTools(message: MessageView): ToolView[] {
+  return message.parts
+    .filter((part): part is Extract<MessagePart, { kind: "tool" }> => part.kind === "tool")
+    .map((part) => part.tool);
 }
 
 export type RunStatus = "idle" | "thinking" | "responding" | "tool" | "permission";
@@ -81,6 +117,7 @@ export type Action =
   | { type: "turn"; turn: number }
   | { type: "tool_start"; id: string; name: string; preview: string }
   | { type: "tool_end"; id: string; output: string; isError: boolean; summary?: string }
+  | { type: "compacted"; summary: string }
   | { type: "permission"; tool: string; preview: string }
   | { type: "permission_clear" }
   | { type: "status"; status: RunStatus }
@@ -90,7 +127,7 @@ export type Action =
   | { type: "scroll"; delta: number; maxScroll: number }
   | { type: "pin" }
   | { type: "toggle_thinking"; id: string }
-  | { type: "toggle_tool"; id: string }
+  | { type: "toggle_tool"; messageId: string; id: string }
   | { type: "set_model"; modelRef: string; model: string }
   | { type: "seed"; messages: MessageView[]; modelRef: string; model: string }
   | { type: "reset" };
@@ -118,19 +155,19 @@ export function initialState(options: {
   /** Seed transcript, used when resuming a stored session. */
   messages?: MessageView[];
 }): AppState {
-    return {
-      messages: options.messages ? [...options.messages] : [],
-      status: "idle",
-      model: options.model,
-      modelRef: options.modelRef,
-      usage: undefined,
-      totals: { prompt: 0, completion: 0, cached: 0 },
-      turn: 0,
-      pendingPermission: null,
-      scroll: { pinned: true, offset: 0 },
-      error: null,
-      lastStop: null,
-    };
+  return {
+    messages: options.messages ? [...options.messages] : [],
+    status: "idle",
+    model: options.model,
+    modelRef: options.modelRef,
+    usage: undefined,
+    totals: { prompt: 0, completion: 0, cached: 0 },
+    turn: 0,
+    pendingPermission: null,
+    scroll: { pinned: true, offset: 0 },
+    error: null,
+    lastStop: null,
+  };
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -138,7 +175,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "user":
       return {
         ...state,
-        messages: [...state.messages, newMessage("user", action.text)],
+        messages: [...state.messages, newMessage("user", [{ kind: "text", text: action.text }])],
         error: null,
         scroll: { ...state.scroll, pinned: true },
       };
@@ -146,21 +183,25 @@ export function reducer(state: AppState, action: Action): AppState {
     case "assistant_start":
       return {
         ...state,
-        messages: [...state.messages, { ...newMessage("assistant", ""), streaming: true }],
+        messages: [...state.messages, { ...newMessage("assistant", []), streaming: true }],
         scroll: { ...state.scroll, pinned: true },
       };
 
     case "delta":
-      return mapLast(state, (message) => ({
-        ...message,
-        text: message.text + action.text,
-      }));
+      return mapLast(state, (message) => appendPart(message, "text", action.text));
 
     case "reasoning":
-      return mapLast(state, (message) => ({
-        ...message,
-        reasoning: message.reasoning + action.text,
-      }));
+      return mapLast(state, (message) => appendPart(message, "thinking", action.text));
+
+    case "compacted":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          newMessage("compact", [{ kind: "text", text: action.summary }]),
+        ],
+        scroll: { ...state.scroll, pinned: true },
+      };
 
     case "model":
       return mapLast({ ...state, model: action.model }, (message) => ({
@@ -174,14 +215,17 @@ export function reducer(state: AppState, action: Action): AppState {
     case "tool_start":
       return mapLast(state, (message) => ({
         ...message,
-        tools: [
-          ...message.tools,
+        parts: [
+          ...message.parts,
           {
-            id: action.id,
-            name: action.name,
-            preview: action.preview,
-            status: "running" as const,
-            expanded: false,
+            kind: "tool",
+            tool: {
+              id: action.id,
+              name: action.name,
+              preview: action.preview,
+              status: "running" as const,
+              expanded: false,
+            },
           },
         ],
       }));
@@ -189,15 +233,18 @@ export function reducer(state: AppState, action: Action): AppState {
     case "tool_end":
       return mapLast(state, (message) => ({
         ...message,
-        tools: message.tools.map((tool) =>
-          tool.id === action.id
+        parts: message.parts.map((part) =>
+          part.kind === "tool" && part.tool.id === action.id
             ? {
-                ...tool,
-                status: action.isError ? ("error" as const) : ("done" as const),
-                output: action.output,
-                ...(action.summary !== undefined ? { summary: action.summary } : {}),
+                kind: "tool" as const,
+                tool: {
+                  ...part.tool,
+                  status: action.isError ? ("error" as const) : ("done" as const),
+                  output: action.output,
+                  ...(action.summary !== undefined ? { summary: action.summary } : {}),
+                },
               }
-            : tool,
+            : part,
         ),
       }));
 
@@ -228,7 +275,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "error":
-      return errorOnLast({ ...state, error: action.message }, action.message);
+      return mapLast({ ...state, error: action.message }, (last) => ({
+        ...last,
+        error: action.message,
+        streaming: false,
+      }));
 
     case "done":
       return {
@@ -266,22 +317,22 @@ export function reducer(state: AppState, action: Action): AppState {
     case "toggle_tool":
       return {
         ...state,
-        messages: state.messages.map((message) => ({
-          ...message,
-          tools: message.tools.map((tool) =>
-            tool.id === action.id ? { ...tool, expanded: !tool.expanded } : tool,
-          ),
-        })),
+        messages: state.messages.map((message) =>
+          message.id === action.messageId
+            ? {
+                ...message,
+                parts: message.parts.map((part) =>
+                  part.kind === "tool" && part.tool.id === action.id
+                    ? { kind: "tool" as const, tool: { ...part.tool, expanded: !part.tool.expanded } }
+                    : part,
+                ),
+              }
+            : message,
+        ),
       };
 
     case "set_model":
       return { ...state, modelRef: action.modelRef, model: action.model };
-
-    case "reset":
-      return {
-        ...initialState({ model: state.model, modelRef: state.modelRef }),
-        totals: { prompt: 0, completion: 0, cached: 0 },
-      };
 
     case "seed":
       return {
@@ -298,23 +349,43 @@ export function reducer(state: AppState, action: Action): AppState {
         scroll: { pinned: true, offset: 0 },
       };
 
+    case "reset":
+      return {
+        ...initialState({ model: state.model, modelRef: state.modelRef }),
+        totals: { prompt: 0, completion: 0, cached: 0 },
+      };
+
     default:
       return state;
   }
 }
 
 let counter = 0;
-function newMessage(role: "user" | "assistant", text: string): MessageView {
+function newMessage(role: MessageRole, parts: MessagePart[]): MessageView {
   counter += 1;
   return {
     id: `m${counter}`,
     role,
-    text,
-    reasoning: "",
+    parts,
     streaming: false,
     thinkingExpanded: false,
-    tools: [],
   };
+}
+
+/**
+ * Appends streamed content to the trailing part when it is the same kind, so
+ * consecutive tokens stay in one part instead of exploding into thousands.
+ */
+function appendPart(message: MessageView, kind: "text" | "thinking", text: string): MessageView {
+  if (text.length === 0) return message;
+  const parts = [...message.parts];
+  const last = parts[parts.length - 1];
+  if (last && last.kind === kind) {
+    parts[parts.length - 1] = { kind, text: last.text + text };
+  } else {
+    parts.push({ kind, text });
+  }
+  return { ...message, parts };
 }
 
 function mapLast(state: AppState, fn: (message: MessageView) => MessageView): AppState {
@@ -323,8 +394,4 @@ function mapLast(state: AppState, fn: (message: MessageView) => MessageView): Ap
   const last = messages[messages.length - 1]!;
   messages[messages.length - 1] = fn(last);
   return { ...state, messages };
-}
-
-function errorOnLast(state: AppState, message: string): AppState {
-  return mapLast(state, (last) => ({ ...last, error: message, streaming: false }));
 }
