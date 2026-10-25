@@ -408,6 +408,10 @@ The full suite, a build, and a real agent run through the compiled binary were
 all verified on **Node 22.23.4 and Node 24.22.1** — the `>= 22` requirement is
 tested, not assumed.
 
+CI runs the typecheck, the whole suite and a build on both Node 22 and 24, then
+boots the compiled CLI. See the **Actions** tab for the latest run — workflow
+badges do not render on private repositories.
+
 **184 tests** cover the pure and near-pure layers: text measurement and wrapping,
 the input editor, the reducer, markdown rendering, the syntax highlighter,
 argument parsing, JSONC, config merging, secret resolution, all seven tools
