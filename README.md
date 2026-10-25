@@ -359,6 +359,10 @@ npm run test:smoke    # 28 end-to-end TUI checks (needs a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
 
+The full suite, a build, and a real agent run through the compiled binary were
+all verified on **Node 22.23.4 and Node 24.22.1** — the `>= 22` requirement is
+tested, not assumed.
+
 **144 tests** cover the pure and near-pure layers: text measurement and wrapping,
 the input editor, the reducer, markdown rendering, argument parsing, JSONC,
 config merging, secret resolution, all seven tools against a real temp
