@@ -69,8 +69,23 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
     sources.push(file);
   }
 
-  if (files.length === 0) {
+  // The built-in provider is a starting point, not a fallback that disappears
+  // the moment someone writes a config for something else. Merge it whenever the
+  // config does not define providers itself — otherwise a file that only tweaks
+  // `permission` (or previously `systemPrompt`) would leave buka with no
+  // providers at all.
+  if (merged["providers"] === undefined) {
     merged = deepMerge(defaultConfig(), merged);
+  }
+
+  // Keys that moved to SYSTEM_PROMPT.md. Say so rather than silently dropping
+  // them, which would look like the prompt was ignored.
+  for (const legacy of ["systemPrompt", "systemPromptFile"]) {
+    if (merged[legacy] !== undefined) {
+      warnings.push(
+        `"${legacy}" is no longer a config option — put the prompt in ${join(configDir(), "SYSTEM_PROMPT.md")} instead`,
+      );
+    }
   }
 
   const parsed = ConfigSchema.safeParse(merged);
@@ -83,15 +98,27 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   return { config: materialize(parsed.data, warnings), sources, warnings };
 }
 
-/** Writes a starter config to the global location and returns its path. */
+/**
+ * Writes a starter config to the global location and returns its path.
+ *
+ * Prefers a local key file over an environment variable when one exists, so
+ * `buka init` produces something that actually works on this machine rather than
+ * a config that immediately 401s.
+ */
 export function writeStarterConfig(overwrite = false): string {
   const target = join(configDir(), CONFIG_FILENAMES[0]!);
   if (existsSync(target) && !overwrite) {
     throw new ConfigError(`Config already exists: ${target}`);
   }
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, STARTER_CONFIG, "utf8");
+  writeFileSync(target, starterConfig(), "utf8");
   return target;
+}
+
+function starterConfig(): string {
+  const localKey = join(homedir(), ".config", "opencode", "9router.key");
+  const keyRef = existsSync(localKey) ? `{file:${localKey}}` : "{env:BUKA_9ROUTER_KEY}";
+  return STARTER_CONFIG.replace("__API_KEY__", keyRef);
 }
 
 function parseFile(file: string): Record<string, unknown> {
@@ -166,30 +193,12 @@ function materialize(config: Config, warnings: string[]): ResolvedConfig {
     };
   }
 
-  const systemPrompt = loadSystemPrompt(config);
-
   return {
     model: config.model ?? "",
-    systemPrompt,
     providers,
     permission: config.permission as PermissionConfig,
     tui: config.tui as TuiConfig,
   };
-}
-
-function loadSystemPrompt(config: Config): string | undefined {
-  if (config.systemPrompt && config.systemPrompt.trim().length > 0) {
-    return config.systemPrompt.trim();
-  }
-  if (config.systemPromptFile) {
-    const file = resolve(expandHome(config.systemPromptFile));
-    try {
-      return readFileSync(file, "utf8").trim();
-    } catch (cause) {
-      throw new ConfigError(`Cannot read systemPromptFile ${file}: ${(cause as Error).message}`);
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -260,7 +269,7 @@ function defaultConfig(): Record<string, unknown> {
 
 const STARTER_CONFIG = `{
   // buka ai configuration
-  // Docs: https://github.com/ — see README
+  // The system prompt is NOT here — edit ~/.config/buka-ai/SYSTEM_PROMPT.md
   "$schema": "https://buka.ai/config.json",
 
   // Default model: "provider/modelKey"
@@ -272,7 +281,7 @@ const STARTER_CONFIG = `{
       "type": "openai-compatible",
       "baseURL": "http://127.0.0.1:20128/v1",
       // Secrets support {env:VAR} and {file:path}
-      "apiKey": "{env:BUKA_9ROUTER_KEY}",
+      "apiKey": "__API_KEY__",
       "discover": true,
       "models": {
         "davo": {

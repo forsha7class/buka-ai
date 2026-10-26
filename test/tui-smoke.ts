@@ -87,6 +87,11 @@ async function waitFor(predicate: () => boolean, timeoutMs: number, label: strin
 }
 
 async function main(): Promise<number> {
+  // Isolate the config directory: resolving the prompt seeds a file, and a test
+  // must never write into the developer's real ~/.config.
+  const configHome = mkdtempSync(join(tmpdir(), "buka-smoke-config-"));
+  process.env["XDG_CONFIG_HOME"] = configHome;
+
   const storeDir = mkdtempSync(join(tmpdir(), "buka-smoke-sessions-"));
   const store = new SessionStore(storeDir);
   const runtime = await createRuntime({
@@ -297,6 +302,7 @@ async function main(): Promise<number> {
       /* already unmounted */
     }
     rmSync(storeDir, { recursive: true, force: true });
+    rmSync(configHome, { recursive: true, force: true });
   }
 
   process.stdout.write(`\n${"─".repeat(100)}\nSCREEN (tail)\n${"─".repeat(100)}\n`);

@@ -60,7 +60,9 @@
     "showThinking": true,
     "showTokenUsage": true
   }
-
-  // "systemPrompt": "You are terse and always cite file paths.",
-  // "systemPromptFile": "./AGENTS.md"
 }
+
+// The system prompt is NOT configured here. It lives in its own file:
+//   ~/.config/buka-ai/SYSTEM_PROMPT.md
+// Edit that file and restart buka — no rebuild needed. Check what is actually
+// sent with:  buka --show-prompt

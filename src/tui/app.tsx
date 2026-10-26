@@ -14,7 +14,6 @@ import {
 } from "react";
 
 import { runAgent } from "../agent/loop.js";
-import { buildSystemPrompt } from "../agent/system-prompt.js";
 import { createDefaultTools } from "../agent/tools/index.js";
 import type { ToolRegistry } from "../agent/tools/registry.js";
 import type { PermissionRequest } from "../agent/tools/types.js";
@@ -163,17 +162,9 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   const [pickerLoading, setPickerLoading] = useState(false);
 
   const tools = useMemo(() => createDefaultTools(cwd), [cwd]);
-  const systemPrompt = useMemo(
-    () =>
-      buildSystemPrompt({
-        cwd,
-        tools,
-        ...(runtime.config.systemPrompt !== undefined
-          ? { custom: runtime.config.systemPrompt }
-          : {}),
-      }),
-    [cwd, tools, runtime.config.systemPrompt],
-  );
+  // Resolved once at startup from SYSTEM_PROMPT.md, so switching models or
+  // resuming a session never drifts from what print mode sends.
+  const systemPrompt = runtime.systemPrompt;
 
   const sessionRef = useRef<Session | undefined>(resume);
   const messagesRef = useRef<ChatMessage[]>([

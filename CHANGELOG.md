@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
+### Added
+
+- **The system prompt is now a file you edit.** `~/.config/buka-ai/SYSTEM_PROMPT.md`
+  is created automatically on first use and read on every run — change the
+  wording and restart, no rebuild. HTML comments in the file are stripped before
+  sending, so it can carry usage notes without them reaching the model.
+- **`buka --show-prompt`** prints the exact assembled prompt (file text,
+  environment, tool list) and reports which file it came from.
+- The `Environment` block and `Available tools` list are appended automatically,
+  so the prompt file only needs to contain the persona and rules.
+
+### Changed
+
+- **Breaking:** the `systemPrompt` and `systemPromptFile` config options are
+  removed — the prompt has exactly one home now. A config that still sets them
+  gets a warning pointing at the new file instead of being silently ignored.
+- `buka init` now also creates the prompt file, and prefers a local key file over
+  `{env:BUKA_9ROUTER_KEY}` when one exists — the previous starter config produced
+  an immediate 401 on a machine without that variable set.
+- A config that sets only some keys (say, `permission`) no longer wipes out the
+  built-in provider. The default provider is merged whenever the config does not
+  define `providers` itself.
+- The assembled prompt is resolved once at startup and shared by the TUI, print
+  mode and `--show-prompt`, instead of each building its own.
+
+### Fixed
+
+- Editing the prompt used to require a source change and a rebuild; the config
+  override and the embedded default could disagree about what was being sent.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added
@@ -71,5 +103,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 144 unit/integration tests and 28 end-to-end TUI checks.
 
 [Unreleased]: https://github.com/forsha7class/buka-ai/commits/main
+[0.3.0]: https://github.com/forsha7class/buka-ai/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/forsha7class/buka-ai/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/forsha7class/buka-ai/releases/tag/v0.1.0

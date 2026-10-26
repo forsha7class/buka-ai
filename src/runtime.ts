@@ -1,5 +1,8 @@
 import { loadConfig, type LoadConfigOptions } from "./config/load.js";
 import type { ResolvedConfig, ResolvedProviderConfig } from "./config/schema.js";
+import { resolvePrompt, type ResolvedPrompt } from "./agent/prompt.js";
+import { buildSystemPrompt } from "./agent/system-prompt.js";
+import { createDefaultTools } from "./agent/tools/index.js";
 import { ModelNotFoundError, ProviderRegistry, type ResolvedModel } from "./provider/registry.js";
 import type { ProviderConfig } from "./provider/types.js";
 
@@ -9,12 +12,21 @@ export interface RuntimeOptions {
   configPath?: string;
   cwd?: string;
   ignoreProject?: boolean;
+  /**
+   * Create `~/.config/buka-ai/SYSTEM_PROMPT.md` from the built-in default when
+   * it is missing. Off for read-only subcommands like `models` / `sessions`.
+   */
+  seedPrompt?: boolean;
 }
 
 export interface Runtime {
   config: ResolvedConfig;
   registry: ProviderRegistry;
   model: ResolvedModel;
+  /** Assembled system prompt — the single prompt every runner uses. */
+  systemPrompt: string;
+  /** Where that prompt came from, for `--show-prompt` and diagnostics. */
+  promptSource: ResolvedPrompt;
   /** Config files that contributed, in increasing precedence order. */
   sources: string[];
   warnings: string[];
@@ -47,6 +59,13 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
   const registry = new ProviderRegistry(providerConfigs);
   const notes: string[] = [];
 
+  const prompt = resolvePrompt({ seed: options.seedPrompt ?? true });
+  notes.push(...prompt.notes);
+
+  // Assembled once here so every runner sends the identical system message.
+  const sessionCwd = options.cwd ?? process.cwd();
+  const tools = createDefaultTools(sessionCwd);
+
   const requested = options.model ?? config.model;
   let reference = requested ?? "";
 
@@ -61,6 +80,8 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     config,
     registry,
     model: registry.resolve(reference),
+    systemPrompt: buildSystemPrompt({ cwd: sessionCwd, tools, prompt: prompt.text }),
+    promptSource: prompt,
     sources,
     warnings,
     notes,

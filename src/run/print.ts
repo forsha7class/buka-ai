@@ -2,7 +2,6 @@ import type { PermissionConfig } from "../config/schema.js";
 import type { ChatMessage, ToolCall, Usage } from "../provider/types.js";
 import type { ToolRegistry } from "../agent/tools/registry.js";
 import type { Session, ToolResultRecord } from "../session/store.js";
-import { buildSystemPrompt } from "../agent/system-prompt.js";
 import { createPermissionHandler } from "../agent/permission.js";
 import { runAgent } from "../agent/loop.js";
 import type { Runtime } from "../runtime.js";
@@ -45,15 +44,9 @@ export async function runPrint(options: PrintOptions): Promise<PrintResult> {
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: buildSystemPrompt({
-        cwd,
-        ...(options.tools ? { tools: options.tools } : {}),
-        ...(options.systemPrompt !== undefined
-          ? { custom: options.systemPrompt }
-          : options.runtime.config.systemPrompt !== undefined
-            ? { custom: options.runtime.config.systemPrompt }
-            : {}),
-      }),
+      // Assembled once in the runtime, so print mode, the TUI and
+      // `--show-prompt` all send the identical system message.
+      content: options.systemPrompt ?? options.runtime.systemPrompt,
     },
     ...(options.history ?? session?.toChatMessages() ?? []),
     { role: "user", content: options.prompt },

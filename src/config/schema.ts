@@ -57,9 +57,6 @@ export const ConfigSchema = z.object({
   $schema: z.string().optional(),
   /** Default model reference: `provider/modelKey` or `provider/<raw-model-id>`. */
   model: z.string().optional(),
-  /** Inline system prompt, or a path to one. */
-  systemPrompt: z.string().optional(),
-  systemPromptFile: z.string().optional(),
   providers: z.record(z.string(), ProviderSchema).default({}),
   // `prefault` (not `default`) so the nested field defaults still apply when
   // the key is absent from the config file.
@@ -75,7 +72,6 @@ export type Config = z.infer<typeof ConfigSchema>;
  */
 export interface ResolvedConfig {
   model: string;
-  systemPrompt: string | undefined;
   providers: Record<string, ResolvedProviderConfig>;
   permission: PermissionConfig;
   tui: TuiConfig;

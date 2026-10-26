@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 
 import { ConfigError, writeStarterConfig } from "./config/load.js";
+import { resolvePrompt } from "./agent/prompt.js";
 import { createDefaultTools } from "./agent/tools/index.js";
 import { createRuntime, type Runtime } from "./runtime.js";
 import { runPrint } from "./run/print.js";
@@ -23,6 +24,7 @@ const FLAGS: FlagSpec[] = [
   { name: "no-tools" },
   { name: "max-turns", value: true },
   { name: "list-models" },
+  { name: "show-prompt" },
 ];
 
 function version(): string {
@@ -58,10 +60,14 @@ ${style.bold("OPTIONS")}
       --max-turns <n>            cap agent turns (default 32)
       --verbose                  stream reasoning + token usage to stderr
       --list-models              list available models
+      --show-prompt              print the system prompt that would be sent
   -h, --help                     show this help
   -v, --version                  print the version
 
 ${style.bold("NOTES")}
+  The system prompt lives in ~/.config/buka-ai/SYSTEM_PROMPT.md — edit it there,
+  no rebuild needed. HTML comments in that file are not sent to the model.
+
   Interactive runs are always saved. A one-shot run is saved only when it
   resumes a session (--continue / --session), so scripts stay ephemeral.
 
@@ -96,8 +102,16 @@ async function main(): Promise<number> {
 
   if (command === "init") {
     try {
-      const path = writeStarterConfig(getBool(args, "yolo"));
-      process.stdout.write(`${color.green(symbol.ok)} wrote ${path}\n`);
+      const configPath = writeStarterConfig(getBool(args, "yolo"));
+      // Also materialise the prompt file, so there is something to edit.
+      const prompt = resolvePrompt();
+      process.stdout.write(`${color.green(symbol.ok)} wrote ${configPath}\n`);
+      for (const note of prompt.notes) {
+        process.stdout.write(`${color.dimGray("·")} ${style.dim(note)}\n`);
+      }
+      process.stdout.write(
+        `${color.dimGray("·")} ${style.dim(`system prompt: ${prompt.path}`)}\n`,
+      );
       return 0;
     } catch (cause) {
       process.stderr.write(`${color.red(symbol.fail)} ${(cause as Error).message}\n`);
@@ -105,12 +119,18 @@ async function main(): Promise<number> {
     }
   }
 
+  // Read-only subcommands should not create the user's prompt file as a side
+  // effect; they never send a prompt.
+  const readOnlyCommand =
+    command === "models" || command === "sessions" || getBool(args, "list-models");
+
   let runtime: Runtime;
   try {
     runtime = await createRuntime({
       ...(getString(args, "model") !== undefined ? { model: getString(args, "model")! } : {}),
       ...(getString(args, "config") !== undefined ? { configPath: getString(args, "config")! } : {}),
       ...(getString(args, "cwd") !== undefined ? { cwd: getString(args, "cwd")! } : {}),
+      seedPrompt: !readOnlyCommand,
     });
   } catch (cause) {
     const message = cause instanceof ConfigError ? cause.message : String((cause as Error).message);
@@ -123,6 +143,14 @@ async function main(): Promise<number> {
   }
   for (const note of runtime.notes) {
     process.stderr.write(`${color.dimGray("·")} ${style.dim(note)}\n`);
+  }
+
+  if (getBool(args, "show-prompt")) {
+    process.stdout.write(`${runtime.systemPrompt}\n`);
+    process.stderr.write(
+      `${color.dimGray("·")} ${style.dim(`prompt from ${runtime.promptSource.path} (${runtime.promptSource.source})`)}\n`,
+    );
+    return 0;
   }
 
   if (command === "models" || getBool(args, "list-models")) {

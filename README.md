@@ -6,7 +6,7 @@
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-184%20passing-3fb950)](#testing)
+[![Tests](https://img.shields.io/badge/tests-208%20passing-3fb950)](#testing)
 [![TUI checks](https://img.shields.io/badge/TUI%20checks-31%20passing-3fb950)](#testing)
 [![Provider SDK](https://img.shields.io/badge/provider%20SDK-none-8b5cf6)](#design-notes)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
@@ -185,6 +185,7 @@ buka init         # writes ~/.config/buka-ai/buka.jsonc
 | `--no-tools` | disable tool use for this run |
 | `--max-turns <n>` | cap agent turns (default 32) |
 | `--verbose` | stream reasoning + token usage to stderr |
+| `--show-prompt` | print the system prompt that would be sent, then exit |
 
 ### Keybindings
 
@@ -249,12 +250,12 @@ Global: `~/.config/buka-ai/buka.jsonc` · Project: `./buka.jsonc` (merged over g
     "bash": "ask",   "write": "ask",  "edit": "ask"
   },
 
-  "tui": { "theme": "dark", "showThinking": true, "showTokenUsage": true },
-
-  // optional
-  "systemPromptFile": "./AGENTS.md"
+  "tui": { "theme": "dark", "showThinking": true, "showTokenUsage": true }
 }
 ```
+
+The system prompt is deliberately **not** in this file — see
+[Changing the system prompt](#changing-the-system-prompt).
 
 Any OpenAI-compatible endpoint works: OpenAI, OpenRouter, Groq, Ollama,
 llama.cpp, vLLM, or a local gateway in front of all of them.
@@ -265,14 +266,45 @@ llama.cpp, vLLM, or a local gateway in front of all of them.
 > `9router`, model `Hr/glm-5.3`. Anything not listed in `models` is used as the
 > wire id verbatim, which is why discovery and hand-written configs mix cleanly.
 
+A config that only sets some keys still gets the built-in provider — writing
+`{"permission": {"bash": "deny"}}` does not leave you without providers.
+
+### Changing the system prompt
+
+One file, no rebuild:
+
+```bash
+$EDITOR ~/.config/buka-ai/SYSTEM_PROMPT.md
+# then restart buka
+```
+
+- It is **created automatically** the first time `buka` needs a prompt, seeded
+  from the repository copy, so there is always a real file to open.
+- **HTML comments are stripped** before sending, so the file can carry usage
+  notes without them reaching the model.
+- The `Environment` block and the `Available tools` list are appended for you.
+- Missing or empty (comments only)? It falls back to the built-in default and
+  tells you why.
+- Sitting in your config directory rather than the repository means a
+  `git pull` can never clobber your edits.
+
+```bash
+buka --show-prompt    # exactly what would be sent, plus which file it came from
+```
+
+`--show-prompt` is the honest answer to "what is this thing actually being told?"
+There is no hardcoded prompt string anywhere in the source tree — the repository
+copy at `SYSTEM_PROMPT.md` is the only built-in, and it is just a file.
+
 ---
 
 ## Architecture
 
 ```
+SYSTEM_PROMPT.md            the one built-in prompt (also seeds ~/.config)
 src/
 ├─ cli.tsx                  entry point, flag parsing, subcommands
-├─ runtime.ts               config + provider registry + selected model
+├─ runtime.ts               config + registry + model + resolved prompt
 ├─ config/
 │  ├─ schema.ts             zod schema (the config contract)
 │  ├─ load.ts               JSONC loader, merging, secret resolution
@@ -283,7 +315,8 @@ src/
 │  └─ registry.ts           "provider/model" resolution, discovery
 ├─ agent/
 │  ├─ loop.ts               the agent loop: stream → tools → repeat
-│  ├─ system-prompt.ts      persona + environment
+│  ├─ prompt.ts             resolves + seeds SYSTEM_PROMPT.md
+│  ├─ system-prompt.ts      appends environment + tool list
 │  ├─ permission.ts         ask / allow / deny policy
 │  └─ tools/                read, write, edit, glob, grep, list, bash
 ├─ session/store.ts         append-only JSONL log, context rebuild
@@ -360,6 +393,16 @@ This is what makes scrolling exact, the header guaranteed one line, and the
 chrome impossible to desynchronise — all of it locked down by layout tests
 across five terminal widths.
 
+**The prompt is a file, not a constant.**
+The first version embedded the system prompt in TypeScript, which meant changing
+a word required editing source and rebuilding — and the config could override it,
+so there were two places claiming to be the truth. Now there is exactly one
+built-in (`SYSTEM_PROMPT.md`, a plain file) and one user copy in the config
+directory that seeds from it. The source tree contains no prompt string at all.
+The old `systemPrompt` / `systemPromptFile` config keys are gone; a config still
+carrying them gets a warning naming the new file rather than being silently
+ignored.
+
 **Distinct turns are distinct paragraphs.**
 A multi-turn tool run used to concatenate each turn's text verbatim, so a
 sentence ending one turn fused onto the first word of the next
@@ -399,7 +442,7 @@ directly: highlighting never adds, drops or reorders a single character.
 ## Testing
 
 ```bash
-npm test              # 184 unit + integration tests, no network required
+npm test              # 208 unit + integration tests, no network required
 npm run test:smoke    # 31 end-to-end TUI checks (needs a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
@@ -412,12 +455,12 @@ CI runs the typecheck, the whole suite and a build on both Node 22 and 24, then
 boots the compiled CLI. See the **Actions** tab for the latest run — workflow
 badges do not render on private repositories.
 
-**184 tests** cover the pure and near-pure layers: text measurement and wrapping,
+**208 tests** cover the pure and near-pure layers: text measurement and wrapping,
 the input editor, the reducer, markdown rendering, the syntax highlighter,
-argument parsing, JSONC, config merging, secret resolution, all seven tools
-against a real temp filesystem, the session store, provider protocol decoding,
-and **layout invariants** (asserting no rendered row can ever exceed the terminal
-width).
+prompt resolution and comment stripping, argument parsing, JSONC, config
+merging, secret resolution, all seven tools against a real temp filesystem, the
+session store, provider protocol decoding, and **layout invariants** (asserting
+no rendered row can ever exceed the terminal width).
 
 **The agent loop is tested directly.** `test/loop.test.ts` drives `runAgent`
 with a scripted fake provider, so multi-turn tool chaining, permission modes,

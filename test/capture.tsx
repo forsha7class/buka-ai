@@ -66,6 +66,8 @@ async function main(): Promise<void> {
 
   const stdout = new Sink(columns, rows);
   const stdin = new FakeStdin();
+  // Keep the prompt file out of the developer's real config directory.
+  process.env["XDG_CONFIG_HOME"] = mkdtempSync(join(tmpdir(), "buka-capture-config-"));
   const runtime = await createRuntime({ cwd });
   // Throwaway session store so a capture never touches the developer's history.
   const store = new SessionStore(mkdtempSync(join(tmpdir(), "buka-capture-")));

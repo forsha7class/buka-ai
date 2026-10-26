@@ -6,36 +6,19 @@ import type { ToolRegistry } from "./tools/registry.js";
 export interface SystemPromptOptions {
   cwd: string;
   tools?: ToolRegistry;
-  /** User-supplied override from config; replaces the built-in text. */
-  custom?: string;
+  /** The persona and rules text, resolved from SYSTEM_PROMPT.md. */
+  prompt: string;
 }
 
-const BASE = `You are buka, a terminal-native coding agent. You help the user with
-software engineering tasks directly in their working directory.
-
-Working style:
-- Be concise. The user is in a terminal; skip preamble and pleasantries.
-- Investigate before acting: read the relevant files before editing them.
-- Prefer making the change over describing the change.
-- When you are unsure, say so plainly instead of guessing.
-- After editing, verify with the project's own tooling when one exists.
-
-Tool use:
-- Call tools when they help. Do not narrate what you are about to do and then
-  not do it.
-- Batch independent tool calls into a single turn when possible.
-- If a tool is denied by the user, do not retry it. Ask how to proceed instead.
-- Never invent file contents or command output; read them.
-- Prefer the dedicated file tools (read/write/edit/glob/grep) over shelling out.`;
-
+/**
+ * Assembles what is actually sent as the system message.
+ *
+ * The prompt text itself comes from `SYSTEM_PROMPT.md` (see `./prompt.ts`); this
+ * only appends the facts the author should not have to maintain by hand — where
+ * we are running and which tools exist.
+ */
 export function buildSystemPrompt(options: SystemPromptOptions): string {
-  const parts: string[] = [];
-
-  if (options.custom && options.custom.trim().length > 0) {
-    parts.push(options.custom.trim());
-  } else {
-    parts.push(BASE);
-  }
+  const parts: string[] = [options.prompt.trim()];
 
   const environment = [
     `Working directory: ${options.cwd}`,
