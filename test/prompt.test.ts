@@ -228,7 +228,14 @@ describe("config integration", () => {
   it("does not warn for a config that never used those keys", () => {
     const home = freshDir();
     const configPath = join(home, "buka.jsonc");
-    writeFileSync(configPath, '{ "model": "p/m" }', "utf8");
+    // Define providers explicitly so the built-in default is not merged in —
+    // otherwise this test would depend on whether a local key file happens to
+    // exist on the machine running it.
+    writeFileSync(
+      configPath,
+      '{ "model": "p/m", "providers": { "p": { "baseURL": "https://x.test/v1" } } }',
+      "utf8",
+    );
     const { warnings } = loadConfig({ configPath });
     assert.deepEqual(warnings, []);
   });
