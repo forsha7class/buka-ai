@@ -6,7 +6,7 @@
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-208%20passing-3fb950)](#testing)
+[![Tests](https://img.shields.io/badge/tests-214%20passing-3fb950)](#testing)
 [![TUI checks](https://img.shields.io/badge/TUI%20checks-31%20passing-3fb950)](#testing)
 [![Provider SDK](https://img.shields.io/badge/provider%20SDK-none-8b5cf6)](#design-notes)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
@@ -200,8 +200,11 @@ buka init         # writes ~/.config/buka-ai/buka.jsonc
 | `Ctrl+T` | expand / collapse thinking |
 | `Ctrl+O` | expand / collapse tool output |
 | `↑` / `↓` | prompt history (when the cursor is on the first/last row) |
+| `Home` / `End` | start / end of the current line |
 | `Ctrl+A` / `Ctrl+E` | start / end of line |
 | `Ctrl+U` / `Ctrl+W` | delete to line start / delete word |
+| `Ctrl+D` | delete the character under the cursor |
+| `Ctrl+G` | jump back to the newest output |
 | `Ctrl+L` | clear the visible transcript |
 | `Ctrl+C` | stop → clear input → quit |
 
@@ -210,9 +213,10 @@ buka init         # writes ~/.config/buka-ai/buka.jsonc
 `/help` `/model [ref]` `/models` `/sessions` `/new` `/rename <title>`
 `/compact` `/clear` `/tools` `/export [file]` `/exit`
 
-`/compact` asks the model to summarise the conversation and then replaces the
-in-memory context with that summary — useful once a session gets long. The
-session file keeps the full history; only what is sent to the provider shrinks.
+`/compact` asks the model to summarise the conversation and records the boundary
+in the session log, so resuming continues from the summary instead of reloading
+every turn. The log itself keeps the full history — only what is sent to the
+provider shrinks.
 
 ---
 
@@ -442,7 +446,7 @@ directly: highlighting never adds, drops or reorders a single character.
 ## Testing
 
 ```bash
-npm test              # 208 unit + integration tests, no network required
+npm test              # 214 unit + integration tests, no network required
 npm run test:smoke    # 31 end-to-end TUI checks (needs a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
@@ -455,12 +459,17 @@ CI runs the typecheck, the whole suite and a build on both Node 22 and 24, then
 boots the compiled CLI. See the **Actions** tab for the latest run — workflow
 badges do not render on private repositories.
 
-**208 tests** cover the pure and near-pure layers: text measurement and wrapping,
+**214 tests** cover the pure and near-pure layers: text measurement and wrapping,
 the input editor, the reducer, markdown rendering, the syntax highlighter,
 prompt resolution and comment stripping, argument parsing, JSONC, config
 merging, secret resolution, all seven tools against a real temp filesystem, the
 session store, provider protocol decoding, and **layout invariants** (asserting
 no rendered row can ever exceed the terminal width).
+
+Two of those suites exist to stop documentation from drifting away from the code:
+one reads the real key handlers and slash-command dispatcher out of `app.tsx` and
+requires them to be documented in both `/help` and the README, and the layout
+suite renders the real components to prove a row can never overflow.
 
 **The agent loop is tested directly.** `test/loop.test.ts` drives `runAgent`
 with a scripted fake provider, so multi-turn tool chaining, permission modes,

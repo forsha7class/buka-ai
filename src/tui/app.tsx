@@ -88,7 +88,7 @@ const COMPACT_PROMPT = [
   "Be specific about paths, symbol names and commands. Aim for under 500 words.",
 ].join("\n");
 
-const HELP_TEXT = [
+export const HELP_TEXT = [
   "slash commands",
   "  /help              show this help",
   "  /model [ref]       switch model (no argument opens the picker)",
@@ -97,20 +97,26 @@ const HELP_TEXT = [
   "  /new               start a fresh session",
   "  /rename <title>    name the current session",
   "  /clear             clear the visible transcript (session file is kept)",
-  "  /compact           summarise the conversation to shrink the context window",
+  "  /compact           summarise earlier turns to shrink the context window",
   "  /tools             list the tools the agent can use",
   "  /export [file]     write the conversation to a markdown file",
   "  /exit              quit",
   "",
   "keys",
   "  Enter              send",
-  "  Alt+Enter          new line",
+  "  Alt+Enter / Ctrl+J new line",
   "  Esc                stop the current run",
   "  PgUp / PgDn        scroll the transcript",
   "  Ctrl+K             model picker",
   "  Ctrl+P             session picker",
   "  Ctrl+T             expand / collapse thinking",
   "  Ctrl+O             expand / collapse tool output",
+  "  Up / Down          prompt history when the cursor is at the edge",
+  "  Home / End         start / end of the current line",
+  "  Ctrl+A / Ctrl+E    start / end of line",
+  "  Ctrl+U / Ctrl+W    delete to line start / delete word",
+  "  Ctrl+D             delete the character under the cursor",
+  "  Ctrl+G             jump back to the newest output",
   "  Ctrl+L             clear the transcript",
   "  Ctrl+C             stop, then clear the input, then quit",
 ].join("\n");

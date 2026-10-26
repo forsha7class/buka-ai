@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A drift guard for the keybinding and slash-command documentation. It reads the
+  real handlers out of `app.tsx` and requires every binding and every command to
+  appear in both the in-app `/help` and the README table.
+
+### Fixed
+
+- `Ctrl+D`, `Ctrl+G`, `Home` and `End` were implemented but absent from both
+  `/help` and the README. `Ctrl+J` was missing from `/help`.
+- The `/compact` description still claimed it replaced "the in-memory context";
+  since 0.2.0 it records a boundary in the session log and survives a restart.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added
