@@ -2,18 +2,17 @@
 
 # buka ai
 
-**A terminal-native AI coding agent — full-screen TUI, real tool use, resumable sessions.**
+**A terminal-native AI coding agent with a full-screen TUI, real tool use, and resumable sessions.**
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/tests-233%20passing-3fb950)](#testing)
 [![TUI checks](https://img.shields.io/badge/TUI%20checks-35%20passing-3fb950)](#testing)
-[![Provider SDK](https://img.shields.io/badge/provider%20SDK-none-8b5cf6)](#design-notes)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 
 </div>
 
-```
+```text
  buka ai · 0.3.0            │ Fix flaky users test · ~/buka-ai/main        ● ready  22.3k tok
  9router/davo               │
  deepseek-v4.1-flash        │▸ you
@@ -39,131 +38,142 @@
                             │ ● ready            enter send · alt+enter newline · ctrl+p palette
 ```
 
-<sub>↑ a real session, not a mockup. The model ran the tests, read the code, fixed two files and re-ran the suite to prove it.</sub>
+<p align="center"><sub>A real session: the model ran the tests, read the code, fixed two files, and re-ran the suite to verify the fix.</sub></p>
 
 ---
 
-## What it is
+## Overview
 
-`buka` is a chat CLI that can actually *do* things in your repository: read and
-edit files, run commands, search code, and keep working until the task is done.
-It runs in the terminal you already have, against any OpenAI-compatible
-endpoint.
+`buka` is a chat CLI that can actually *do* things in your repository. It reads
+and edits files, runs commands, searches code, and keeps working until the task
+is done. It runs in your terminal, against any OpenAI-compatible endpoint.
 
-No provider SDK, no daemon, no database. One command, one config file.
+There is no provider SDK, no daemon, and no database. One command, one config
+file, and plain files on disk.
 
 ```bash
 buka                          # interactive TUI
 buka -p "explain src/auth.ts" # one-shot, pipeable
-buka -c                       # resume the last session in this directory
+buka -c                       # resume the latest session in this directory
 ```
+
+**Highlights**
+
+- Full-screen TUI with exact scrolling, a split-pane sidebar, themes, a command
+  palette, and conversation queueing.
+- Seven tools with per-tool permissions: `read`, `write`, `edit`, `glob`, `grep`,
+  `list`, and `bash`.
+- Streaming text and reasoning, syntax-highlighted code, and inline diff previews.
+- Append-only session logs that survive restarts, plus persistent context
+  compaction.
+- Multi-provider configuration with automatic model discovery.
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+  - [CLI](#cli)
+  - [Keybindings](#keybindings)
+  - [Slash commands](#slash-commands)
+- [Configuration](#configuration)
+  - [System prompt](#system-prompt)
+- [Architecture](#architecture)
+- [Design notes](#design-notes)
+- [Testing](#testing)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Limitations](#limitations)
+- [License](#license)
 
 ---
 
 ## Features
 
-**A TUI that behaves like an application, not a log**
+### Terminal-first interface
 
-Alternate screen, its own scrollback, a block cursor, collapsible thinking and
-expandable tool output. The transcript is rendered as a list of pre-wrapped
-lines that the viewport slices, so scrolling is exact and the layout never
-drifts — `test/layout.test.ts` asserts that no row can ever wrap or overflow.
+- Alternate-screen TUI with its own scrollback, block cursor, and keyboard-driven
+  navigation.
+- Split-pane layout on terminals 100 columns or wider: session details, model,
+  context usage, changed files, and active key hints.
+- Collapsible reasoning blocks and expandable tool output.
+- Command palette (`Ctrl+P`), inline slash autocomplete, model picker, and
+  session switcher.
+- Configurable themes (`buka`, `opencode`, `hermes`, `light`, `classic`, or
+  `auto`), switchable at runtime with `/theme`.
+- Messages typed while the agent is working are queued for the next turn instead
+  of being dropped.
 
-**A split pane, not a wall of text**
+### A real agent loop
 
-On terminals 100 columns or wider, a sidebar shows the session, the model and
-its wire name, a context-usage bar, the files the agent has changed, and the
-keys that do something right now. Narrow terminals drop it and keep the same
-single-column transcript. A top bar carries the working directory and git
-branch; the composer is a real box, and the status line sits underneath it.
+- Tools are chained across turns until the task is complete, with a configurable
+  turn ceiling.
+- `edit` requires an exact, unique match; ambiguous edits fail with actionable
+  guidance instead of corrupting a file.
+- `edit` and `write` return unified diffs, rendered inline and preserved across
+  session resumes.
+- Tool output is truncated with an explicit notice, so the model knows what it
+  is missing.
 
-**Hermes-style flow**
+### Deliberate about context
 
-Typing `/` opens a floating command palette with descriptions; `Tab` completes,
-`Enter` runs. `Ctrl+P` opens the full command palette. Typing while the agent is
-working queues the message instead of dropping it, and the queue drains after
-the current turn. A spinner and elapsed time show what is running, and a welcome
-card replaces the empty transcript.
+- Messages are stored as an ordered list of parts (`thinking`, `text`, `tool`),
+  preserving the order in which work actually happened.
+- Session logs are append-only JSONL under `~/.local/share/buka-ai/sessions/`.
+- `/compact` records a compaction boundary instead of rewriting history, so
+  resumes continue from the summary while the full log stays on disk.
 
-**Themes that are actually applied**
+### Provider-agnostic
 
-`tui.theme` was a config key with no effect before; now it selects a real
-palette: `buka` (charcoal and amber, the default), `opencode`, `hermes`, `light`
-and `classic` (the old lavender). `auto` follows the terminal background via
-`COLORFGBG`, and `/theme` switches at runtime.
-
-**Diffs for edits, not just "done"**
-
-`edit` and `write` return a unified diff in tool metadata. The transcript shows
-the changed lines with `+added` / `−removed` counts, and a resumed session still
-shows the same preview because the diff is stored with the tool result.
-
-**A message is an ordered list of parts**
-
-Not "some text plus a list of tools". One request can span many provider turns:
-the model thinks, writes a sentence, calls a tool, thinks again, writes more.
-Parts are kept in the order they happened and rendered that way, so the
-transcript reads the way the work actually went.
-
-**Streaming that shows its work**
-
-Tokens appear as they arrive. Chain-of-thought (`reasoning_content`) is captured
-separately and shown as a collapsed block you can open with `Ctrl+T`, instead of
-being dumped into the answer.
-
-**Syntax highlighting, without a megabyte of grammars**
-
-Fenced code is highlighted by a hand-written, stateful scanner: correct string
-and comment handling, block comments and template literals that carry across
-lines, `$vars` highlighted inside shell quotes, diff hunks coloured by line.
-Unknown languages are left plain rather than guessed at.
-
-**Seven tools, a real agent loop**
-
-`read` `write` `edit` `glob` `grep` `list` `bash` — chained across turns, with a
-turn ceiling as a safety valve. The loop is provider-agnostic and directly unit
-tested against a scripted provider.
-
-**Permissions you can actually reason about**
-
-Per-tool `ask` / `allow` / `deny`. A tool that isn't in the config defaults to
-`ask`, never to "run unattended". Approval is `y` / `n` / `a` (always, for that
-tool). A denial is reported back to the model as a refusal to retry, not as a
-silent failure.
-
-**Sessions that survive the process**
-
-Append-only JSONL under `~/.local/share/buka-ai/sessions/`. Resume from a
-different process and the conversation continues — tool calls, results and part
-order included, in the exact shape the provider expects.
-
-**Compaction that persists**
-
-`/compact` asks the model to summarise the conversation and records the boundary
-in the log. Resuming continues from the summary instead of reloading every turn.
-The log itself is never rewritten — it stays the record of what actually
-happened.
-
-**Multi-provider, discovered**
-
-Declare providers in JSONC; `buka` pulls the model list from `/v1/models` so you
-don't maintain it by hand. Switch models mid-session with `Ctrl+K`. With no
-config at all it finds a local gateway and picks a tool-capable model.
+- Works with OpenAI, OpenRouter, Groq, Ollama, llama.cpp, vLLM, or a local
+  gateway in front of them.
+- Models can be discovered from `/v1/models` or declared explicitly.
+- Switch models mid-session without restarting.
 
 ---
 
-## Quickstart
+## Requirements
+
+- **Node.js >= 22**
+- An OpenAI-compatible API endpoint (local or hosted)
+- Optional: [`ripgrep`](https://github.com/BurntSushi/ripgrep) for faster `grep`
+  (a JavaScript fallback is built in)
+
+---
+
+## Installation
+
+`buka-ai` is not published to npm yet. Install from source:
 
 ```bash
-git clone <this-repo> buka-ai && cd buka-ai
+git clone https://github.com/forsha7class/buka-ai.git
+cd buka-ai
 npm install
 npm run build
-npm link          # gives you the `buka` command
-
-buka              # go
+npm link        # makes the `buka` command available globally
 ```
 
-Requires **Node >= 22**. Point it at any OpenAI-compatible endpoint:
+Verify the installation:
+
+```bash
+buka --version
+```
+
+To uninstall the global link later:
+
+```bash
+npm unlink -g buka-ai
+```
+
+---
+
+## Quick start
+
+Point `buka` at a provider using environment variables:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -171,82 +181,128 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 buka
 ```
 
-For a richer setup (multiple providers, permissions, a custom system prompt):
+For a persistent setup with multiple providers, permissions, and themes:
 
 ```bash
-buka init         # writes ~/.config/buka-ai/buka.jsonc
+buka init       # writes ~/.config/buka-ai/buka.jsonc
+$EDITOR ~/.config/buka-ai/buka.jsonc
+```
+
+Then start the TUI:
+
+```bash
+buka
+```
+
+Useful first commands inside the TUI:
+
+```text
+/help          show commands and keybindings
+/models        list available models
+/theme         switch the colour palette
 ```
 
 ---
 
 ## Usage
 
-| Command | What it does |
-|---|---|
-| `buka` | start the interactive TUI |
-| `buka -p "<prompt>"` | one-shot: answer to stdout, diagnostics to stderr |
-| `buka -c` | resume the most recent session for this directory |
-| `buka -s <id>` | resume a specific session |
-| `buka models` | list every available model |
-| `buka sessions` | list saved sessions |
-| `buka init` | write a starter config |
+### CLI
 
-| Flag | Meaning |
+| Command | Description |
 |---|---|
-| `-m, --model <ref>` | override the model (`provider/modelKey`) |
-| `-p, --print <prompt>` | run non-interactively |
-| `-c, --continue` | resume the latest session for this directory |
-| `-s, --session <id>` | resume a specific session |
-| `--config <path>` | use a specific config file |
-| `--cwd <dir>` | set the working directory |
-| `--yolo` | auto-approve every tool call |
-| `--no-tools` | disable tool use for this run |
-| `--max-turns <n>` | cap agent turns (default 32) |
-| `--verbose` | stream reasoning + token usage to stderr |
-| `--show-prompt` | print the system prompt that would be sent, then exit |
+| `buka` | Start the interactive TUI. |
+| `buka -p "<prompt>"` | Run one prompt non-interactively; answer to stdout, diagnostics to stderr. |
+| `buka -c` | Resume the most recent session for the current directory. |
+| `buka -s <id>` | Resume a specific session. |
+| `buka models` | List every available model. |
+| `buka sessions` | List saved sessions. |
+| `buka init` | Write a starter config file. |
+
+| Flag | Description |
+|---|---|
+| `-m, --model <ref>` | Override the configured model (`provider/modelKey`). |
+| `-p, --print <prompt>` | Run non-interactively and print the answer. |
+| `-c, --continue` | Resume the latest session for this directory. |
+| `-s, --session <id>` | Resume a specific session. |
+| `--config <path>` | Use a specific config file. |
+| `--cwd <dir>` | Set the working directory. |
+| `--yolo` | Auto-approve every tool call. |
+| `--no-tools` | Disable tool use for this run. |
+| `--max-turns <n>` | Cap agent turns (default: 32). |
+| `--verbose` | Stream reasoning and token usage to stderr. |
+| `--list-models` | List available models (same as `buka models`). |
+| `--show-prompt` | Print the assembled system prompt and exit. |
+| `-h, --help` | Show help. |
+| `-v, --version` | Print the version. |
+
+**Examples**
+
+```bash
+# Ask a question about the current repository
+buka -p "explain the request flow in src/"
+
+# Resume the last session and continue the task
+buka -c -p "now add tests for that"
+
+# Run unattended with a specific model
+buka --yolo -m 9router/davo -p "refactor utils.ts and run the tests"
+
+# Inspect exactly what the model is being told
+buka --show-prompt
+```
 
 ### Keybindings
 
 | Key | Action |
 |---|---|
-| `Enter` | send |
-| `Alt+Enter` / `Ctrl+J` | new line |
-| `Esc` | stop the running turn |
-| `PgUp` / `PgDn` | scroll the transcript |
-| `Ctrl+P` | command palette |
-| `Ctrl+X` | session switcher, or the queue when messages are waiting |
-| `Ctrl+K` | model picker |
-| `Ctrl+B` | toggle the sidebar |
-| `Ctrl+T` | expand / collapse thinking |
-| `Ctrl+O` | expand / collapse tool output |
-| `↑` / `↓` | prompt history (when the cursor is on the first/last row) |
-| `Home` / `End` | start / end of the current line |
-| `Ctrl+A` / `Ctrl+E` | start / end of line |
-| `Ctrl+U` / `Ctrl+W` | delete to line start / delete word |
-| `Ctrl+D` | delete the character under the cursor |
-| `Ctrl+G` | jump back to the newest output |
-| `Ctrl+L` | clear the visible transcript |
-| `Ctrl+C` | stop → clear input → quit |
+| `Enter` | Send; queues the message while the agent is running. |
+| `Alt+Enter` / `Ctrl+J` | Insert a new line. |
+| `Esc` | Stop the running turn, or close a panel. |
+| `PgUp` / `PgDn` | Scroll the transcript. |
+| `Ctrl+P` | Open the command palette. |
+| `Ctrl+X` | Open the session switcher, or the queue when messages are waiting. |
+| `Ctrl+K` | Open the model picker. |
+| `Ctrl+B` | Toggle the sidebar. |
+| `Ctrl+T` | Expand or collapse thinking. |
+| `Ctrl+O` | Expand or collapse tool output. |
+| `Up` / `Down` | Prompt history when the cursor is on the first or last row. |
+| `Home` / `End` | Start or end of the current line. |
+| `Ctrl+A` / `Ctrl+E` | Start or end of line. |
+| `Ctrl+U` / `Ctrl+W` | Delete to line start / delete the previous word. |
+| `Ctrl+D` | Delete the character under the cursor. |
+| `Ctrl+G` | Jump to the newest output. |
+| `Ctrl+L` | Clear the visible transcript. |
+| `Ctrl+C` | Stop the running turn, then clear the input, then quit. |
 
 ### Slash commands
 
-`/help` `/model [ref]` `/models` `/sessions` `/new` `/rename <title>`
-`/compact` `/clear` `/tools` `/theme [name]` `/export [file]` `/exit`
+| Command | Description |
+|---|---|
+| `/help` | Show commands and keybindings. |
+| `/model [ref]` | Switch model; without an argument, open the model picker. |
+| `/models` | List every available model. |
+| `/sessions` | Browse and resume past sessions. |
+| `/new` | Start a fresh session. |
+| `/rename <title>` | Name the current session. |
+| `/clear` | Clear the visible transcript; the session file is kept. |
+| `/compact` | Summarise earlier turns to shrink the context window. |
+| `/tools` | List the tools the agent can use. |
+| `/theme [name]` | Switch the colour theme; without an argument, list them. |
+| `/export [file]` | Write the conversation to a Markdown file. |
+| `/exit` | Quit. |
 
-Commands live in one registry (`src/tui/commands.ts`) that also feeds the slash
-autocomplete and the `Ctrl+P` palette, so help text cannot drift from what is
-actually runnable.
-
-`/compact` asks the model to summarise the conversation and records the boundary
-in the session log, so resuming continues from the summary instead of reloading
-every turn. The log itself keeps the full history — only what is sent to the
-provider shrinks.
+Commands live in a single registry (`src/tui/commands.ts`) that also feeds the
+in-app help, slash autocomplete, and command palette, so the documentation cannot
+drift from what is actually runnable.
 
 ---
 
 ## Configuration
 
-Global: `~/.config/buka-ai/buka.jsonc` · Project: `./buka.jsonc` (merged over global)
+Configuration is loaded from:
+
+- **Global:** `~/.config/buka-ai/buka.jsonc` (XDG-aware)
+- **Project:** `./buka.jsonc`, merged over the global file
 
 ```jsonc
 {
@@ -257,9 +313,10 @@ Global: `~/.config/buka-ai/buka.jsonc` · Project: `./buka.jsonc` (merged over g
       "name": "9Router",
       "type": "openai-compatible",
       "baseURL": "http://127.0.0.1:20128/v1",
-      // {env:VAR} or {file:/path/to/key}
+      // Secrets: {env:VAR} or {file:/path/to/key}
       "apiKey": "{env:BUKA_9ROUTER_KEY}",
-      "discover": true,              // pull the model list from /v1/models
+      // Discover models from the endpoint's /v1/models
+      "discover": true,
       "models": {
         "davo": {
           "id": "Davo",              // wire id, when it differs from the key
@@ -292,54 +349,78 @@ Global: `~/.config/buka-ai/buka.jsonc` · Project: `./buka.jsonc` (merged over g
 }
 ```
 
-The system prompt is deliberately **not** in this file — see
-[Changing the system prompt](#changing-the-system-prompt).
+### Providers
 
-Any OpenAI-compatible endpoint works: OpenAI, OpenRouter, Groq, Ollama,
-llama.cpp, vLLM, or a local gateway in front of all of them.
+Any OpenAI-compatible endpoint works. A provider entry needs a `baseURL`; the API
+key may be a literal value, `{env:VAR}`, or `{file:/path/to/key}`.
 
-> **Model references split on the *first* slash only** — model ids legitimately
-> contain slashes (`Hr/claude-sonnet-4.6`,
-> `@cf/meta/llama-3.2-1b-instruct`). So `9router/Hr/glm-5.3` means provider
-> `9router`, model `Hr/glm-5.3`. Anything not listed in `models` is used as the
-> wire id verbatim, which is why discovery and hand-written configs mix cleanly.
+If no config exists and `OPENAI_API_KEY` is set, `buka` creates a built-in
+provider from `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`). A config
+that only sets some keys still keeps the built-in provider unless it defines
+`providers` itself.
 
-A config that only sets some keys still gets the built-in provider — writing
-`{"permission": {"bash": "deny"}}` does not leave you without providers.
+**Model references split on the first slash only.** Model ids legitimately
+contain slashes (`Hr/claude-sonnet-4.6`, `@cf/meta/llama-3.2-1b-instruct`), so
+`9router/Hr/glm-5.3` means provider `9router`, model `Hr/glm-5.3`. Anything not
+declared in `models` is used as the wire id verbatim, which lets discovery and
+hand-written configs mix cleanly.
 
-### Changing the system prompt
+### Permissions
 
-One file, no rebuild:
+Each tool can be set to:
+
+| Mode | Behaviour |
+|---|---|
+| `allow` | Run immediately. |
+| `ask` | Prompt for approval in the TUI. |
+| `deny` | Refuse; the model is told the tool is unavailable. |
+
+A tool with no explicit entry defaults to `ask`, never to unattended execution.
+During an approval prompt, `y` allows once, `n` denies, and `a` allows that tool
+for the rest of the session.
+
+### TUI
+
+| Key | Values | Default | Description |
+|---|---|---|---|
+| `theme` | `auto`, `dark`, `light`, `buka`, `opencode`, `hermes`, `classic` | `auto` | Colour palette. `auto` follows the terminal background. |
+| `sidebar` | `auto`, `true`, `false` | `auto` | `auto` shows the sidebar only on wide terminals. |
+| `animations` | boolean | `true` | Spinner and activity animations. |
+| `busyInput` | `queue`, `block` | `queue` | What `Enter` does while the agent is running. |
+| `showThinking` | boolean | `true` | Show collapsible reasoning blocks. |
+| `showTokenUsage` | boolean | `true` | Show token usage in the status line. |
+
+### System prompt
+
+The system prompt is a file, not a build-time constant:
 
 ```bash
 $EDITOR ~/.config/buka-ai/SYSTEM_PROMPT.md
-# then restart buka
+# restart buka
 ```
 
-- It is **created automatically** the first time `buka` needs a prompt, seeded
-  from the repository copy, so there is always a real file to open.
-- **HTML comments are stripped** before sending, so the file can carry usage
-  notes without them reaching the model.
-- The `Environment` block and the `Available tools` list are appended for you.
-- Missing or empty (comments only)? It falls back to the built-in default and
-  tells you why.
-- Sitting in your config directory rather than the repository means a
-  `git pull` can never clobber your edits.
+- The file is created automatically on first use, seeded from the repository
+  copy.
+- HTML comments are stripped before sending, so the file can carry usage notes
+  without them reaching the model.
+- The `Environment` block and the `Available tools` list are appended
+  automatically.
+- A missing or empty file falls back to the built-in default and reports why.
+- Because the editable copy lives in your config directory, a `git pull` cannot
+  overwrite your changes.
+
+Inspect the exact prompt that would be sent:
 
 ```bash
-buka --show-prompt    # exactly what would be sent, plus which file it came from
+buka --show-prompt
 ```
-
-`--show-prompt` is the honest answer to "what is this thing actually being told?"
-There is no hardcoded prompt string anywhere in the source tree — the repository
-copy at `SYSTEM_PROMPT.md` is the only built-in, and it is just a file.
 
 ---
 
 ## Architecture
 
-```
-SYSTEM_PROMPT.md            the one built-in prompt (also seeds ~/.config)
+```text
+SYSTEM_PROMPT.md            the built-in prompt (also seeds ~/.config)
 src/
 ├─ cli.tsx                  entry point, flag parsing, subcommands
 ├─ runtime.ts               config + registry + model + resolved prompt
@@ -361,11 +442,11 @@ src/
 ├─ run/print.ts             non-interactive runner
 ├─ tui/
 │  ├─ app.tsx               root component, keybindings, agent pump, queue
-│  ├─ commands.ts           slash-command registry (help + autocomplete + palette)
+│  ├─ commands.ts           slash-command registry
 │  ├─ chrome.tsx            sidebar, top bar, composer, status line, banner
-│  ├─ dialogs.tsx           centered dialog and completion-panel line builders
+│  ├─ dialogs.tsx           centered dialog and completion-panel builders
 │  ├─ layout.ts             pure pane geometry, sidebar breakpoints
-│  ├─ theme.ts              palettes, auto light/dark, live `palette` view
+│  ├─ theme.ts              palettes, auto light/dark, live palette view
 │  ├─ blocks.ts             message → styled display lines (incl. diffs)
 │  ├─ highlight.ts          stateful syntax scanner (no dependency)
 │  ├─ text.ts               cell-accurate measurement and wrapping
@@ -373,13 +454,13 @@ src/
 │  ├─ session-view.ts       stored records → display parts
 │  ├─ changes.ts            files touched by edit/write, for the sidebar
 │  ├─ types.ts              state + reducer + ordered message parts
-│  └─ components.tsx        line primitives (`Segments`, `LineList`, `row`)
+│  └─ components.tsx        line primitives
 └─ util/                    SSE parser, JSONC, args, theme, git, http
 ```
 
-A request flows through five layers with one job each:
+A request flows through five layers, each with a single responsibility:
 
-```
+```text
 cli.tsx ──► runtime.ts ──► agent/loop.ts ──► provider/openai-compat.ts ──► network
                               │
                               ├─► tools/* ──► filesystem / shell
@@ -389,183 +470,103 @@ cli.tsx ──► runtime.ts ──► agent/loop.ts ──► provider/openai-c
 ```
 
 The agent loop yields **normalized events** (`text`, `reasoning`, `tool_start`,
-`usage`, `done`, …), which is why the TUI and the non-interactive runner share
-all protocol logic and neither knows what an SSE chunk looks like.
+`usage`, `done`, and others), so the TUI and the non-interactive runner share all
+protocol logic and neither needs to know what an SSE chunk looks like.
 
 ---
 
 ## Design notes
 
-The interesting decisions, and the real-world problems that forced them.
+The decisions below were driven by concrete problems encountered while building
+and using the agent.
 
-**Streaming is always requested, even for "one-shot" answers.**
-Some gateways corrupt the non-streaming body — the one in front of this project
-appends a stray `data: [DONE]` to a perfectly valid JSON object, so a naive
-`JSON.parse` throws. The client asks for SSE unconditionally, and only falls back
-to reading a whole JSON body when the server explicitly says
-`content-type: application/json`. It then extracts the first complete JSON
-object, tolerant of trailing garbage. Regression tested with the exact bytes
-that gateway returns.
+**Streaming is always requested, even for one-shot answers.** Some gateways
+corrupt non-streaming bodies — one appended a stray `data: [DONE]` to valid JSON.
+The client asks for SSE unconditionally and only reads a whole JSON body when the
+server explicitly returns `application/json`, tolerating trailing garbage.
 
-**The model name that comes back is not the one you asked for.**
-Alias and "combo" endpoints resolve to a different upstream model: requesting
-`Davo` streams chunks labelled `deepseek-v4.1-flash`. `chunk.model` is treated as
-the source of truth, the header shows both, and the session records the upstream
-name — because that is what actually ran.
+**The returned model name is the source of truth.** Alias and "combo" endpoints
+resolve to a different upstream model: requesting `Davo` can stream chunks
+labelled `deepseek-v4.1-flash`. The header shows both names, and the session
+records the upstream name because that is what actually ran.
 
-**Edits are strict on purpose.**
-`edit` requires `oldString` to appear exactly once. Zero matches is an error with
-guidance to re-read the file; multiple matches is an error suggesting more
-context or `replaceAll: true`. Both failures are far cheaper than a silently
-corrupted file, and they give the model something actionable to correct.
+**Edits are strict on purpose.** `edit` requires `oldString` to appear exactly
+once. Zero matches is an error with guidance to re-read the file; multiple
+matches is an error suggesting more context or `replaceAll: true`. Both failures
+are cheaper than a silently corrupted file.
 
-**Tool output is capped, and says so.**
-Every tool truncates with an explicit `… output truncated: showing N of M lines`,
-so the model learns the shape of what it is missing and can ask for a narrower
-slice instead of hallucinating the rest.
+**Tool output is capped, and says so.** Every tool truncates with an explicit
+`… output truncated: showing N of M lines`, so the model learns the shape of what
+it is missing and can request a narrower slice.
 
-**Subprocesses do not inherit your credentials.**
-`bash` runs with an environment scrubbed of `OPENAI_*`, `ANTHROPIC_*`, `AWS_*`,
-`BUKA_*`, `GH_*` and friends. A shell command has no business reading the key
-`buka` itself is holding — and it is asserted in `test/tools.test.ts`.
+**Subprocesses do not inherit credentials.** `bash` runs with an environment
+scrubbed of `OPENAI_*`, `ANTHROPIC_*`, `AWS_*`, `BUKA_*`, `GH_*`, and similar
+variables. A shell command has no business reading the key `buka` itself holds.
 
-**The TUI owns its own layout.**
-Rather than depending on how a React renderer decides to wrap text, each message
-is compiled into an array of display lines that are already wrapped and measured
-in terminal cells (CJK and emoji counted as two). The viewport slices that array.
-This is what makes scrolling exact, the header guaranteed one line, and the
-chrome impossible to desynchronise — all of it locked down by layout tests
-across five terminal widths.
+**The TUI owns its layout.** Each message is compiled into display lines that are
+already wrapped and measured in terminal cells (CJK and emoji count as two). The
+viewport slices that array, which makes scrolling exact and desynchronisation
+impossible. Layout tests render the real screen at multiple widths and assert
+that no row overflows.
 
-**The prompt is a file, not a constant.**
-The first version embedded the system prompt in TypeScript, which meant changing
-a word required editing source and rebuilding — and the config could override it,
-so there were two places claiming to be the truth. Now there is exactly one
-built-in (`SYSTEM_PROMPT.md`, a plain file) and one user copy in the config
-directory that seeds from it. The source tree contains no prompt string at all.
-The old `systemPrompt` / `systemPromptFile` config keys are gone; a config still
-carrying them gets a warning naming the new file rather than being silently
-ignored.
+**The prompt is a file, not a constant.** The first version embedded the system
+prompt in TypeScript, so changing a word required a rebuild and the config could
+disagree with the code. Now there is exactly one built-in prompt file and one
+user copy seeded from it; the source tree contains no prompt string.
 
-**Distinct turns are distinct paragraphs.**
-A multi-turn tool run used to concatenate each turn's text verbatim, so a
-sentence ending one turn fused onto the first word of the next
-(literally: ``…`/not found/`.Beres.``). The loop now inserts a paragraph break at
-turn boundaries, and a fake-provider test pins the behaviour.
+**Distinct turns are distinct paragraphs.** A multi-turn tool run used to
+concatenate each turn's text verbatim, fusing sentences together. The loop now
+inserts a paragraph break at turn boundaries.
 
-**Sessions have a total order.**
-Ordering by `updatedAt` alone is not enough: two sessions created in the same
-millisecond come back in filesystem order, and `latest()` decides what `buka -c`
-resumes. The sort falls back to `createdAt` and then `id`.
+**Sessions have a deterministic total order.** Sorting by `updatedAt` alone is
+not enough: two sessions created in the same millisecond come back in filesystem
+order. Ordering falls back to `createdAt` and then `id`, which makes `buka -c`
+predictable.
 
-**`/compact` shrinks the context, not the record.**
-The session log is the append-only truth of what happened. Rewriting it to
-summarise would be a lie, so compaction records a boundary instead:
-`toChatMessages()` starts from the most recent boundary, so resuming continues
-from the summary. The full history stays on disk, and the message count still
-reflects the real turns.
+**`/compact` shrinks the context, not the record.** The append-only log remains
+the truth of what happened. Compaction records a boundary, and `toChatMessages()`
+starts from the most recent boundary.
 
-**Ordered parts, because grouping lies.**
-The first version stored a message as `{ text, tools[] }` and rendered all the
-text followed by all the tools. A real run reads "thinking → sentence → tool →
-more thinking → answer", so that layout silently reordered the work. Messages now
-hold an ordered `parts` array, and the session log stores the same order so a
-resumed transcript replays identically.
+**Ordered parts, because grouping lies.** Storing a message as `{ text, tools[] }`
+and rendering all text before all tools silently reordered real work. Messages
+now hold an ordered `parts` array, and the session log preserves the same order.
 
-**A highlighter worth its weight.**
-`highlight.js`/`shiki` mean megabytes of grammars and startup cost for a CLI that
-mostly prints fragments of JavaScript and shell. The scanner here is a few hundred
-lines with no dependency: it carries state across lines (block comments, template
-literals, triple-quoted strings), highlights `$vars` inside shell double quotes,
-and colours diff hunks by line. It refuses to guess — an unknown language renders
-plain rather than mangled. The one invariant that really matters is asserted
-directly: highlighting never adds, drops or reorders a single character.
-
-**The shell is geometry, not vibes.**
-Ink has no overlay, no z-index and no mouse. So the layout is arithmetic: a pure
-`computeLayout` decides the sidebar width, the transcript height, the composer
-rows and the dialog box, and the panes must add up to the terminal height
-exactly. `test/layout.test.ts` renders the real screen at seven widths and
-asserts every row fits. A dialog is not painted on top of the transcript — it
-*is* the transcript for as long as it is open, which is the only thing Ink can
-actually do reliably.
-
-**The theme is a live view, not a copy.**
-Components read `palette` during render, and `palette` is a set of getters over
-the active theme. Nothing captures a colour at import time — a module-level
-`TOKEN_STYLE` object was the first thing that broke when `/theme` was added, so
-it became a function. Switching a theme re-renders and every pane follows.
-
-**Queueing beats refusing.**
-The old behaviour silently dropped `Enter` while a turn was running. Now the
-message is queued and painted above the composer, and the turn runner drains it
-when it finishes. The queue is mirrored in React state for rendering and in a
-ref for the runner, because the runner must not read state through a stale
-closure.
-
-**A diff belongs to the tool, not the renderer.**
-`edit` and `write` know exactly what they changed, so they attach a unified diff
-to `metadata` alongside the human summary. The TUI renders it, the session log
-keeps it, and a resumed transcript shows the same preview. Reconstructing a diff
-from `before`/`after` snapshots at render time would have been guesswork.
+**Queueing beats refusing.** Input received while a turn is running is queued and
+painted above the composer, then drained when the turn finishes.
 
 ---
 
 ## Testing
 
 ```bash
-npm test              # 233 unit + integration tests, no network required
-npm run test:smoke    # 35 end-to-end TUI checks (needs a live provider)
+npm test              # 233 unit and integration tests, no network required
+npm run test:smoke    # 35 end-to-end TUI checks (requires a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
 
-The full suite, a build, and a real agent run through the compiled binary were
-all verified on **Node 22.23.4 and Node 24.22.1** — the `>= 22` requirement is
-tested, not assumed.
-
-CI runs the typecheck, the whole suite and a build on both Node 22 and 24, then
-boots the compiled CLI. See the **Actions** tab for the latest run — workflow
-badges do not render on private repositories.
-
-**233 tests** cover the pure and near-pure layers: text measurement and wrapping,
+The suite covers the pure and near-pure layers: text measurement and wrapping,
 the input editor, the reducer (including the queue), theme resolution, unified
-diffs, markdown rendering, the syntax highlighter, prompt resolution and comment
-stripping, argument parsing, JSONC, config merging, secret resolution, all seven
-tools against a real temp filesystem, the session store, provider protocol
-decoding, and **layout invariants** — the full screen at forty to a hundred and
-sixty columns, asserting no rendered row can ever exceed the terminal width and
-that the panes fill the height exactly.
+diffs, Markdown rendering, the syntax highlighter, prompt resolution, argument
+parsing, JSONC, config merging, secret resolution, all seven tools against a real
+temporary filesystem, the session store, provider protocol decoding, and layout
+invariants.
 
-Two of those suites exist to stop documentation from drifting away from the code:
-one reads the real key handlers out of `app.tsx` and the command registry out of
-`commands.ts`, and requires them to be documented in both `/help` and the README;
-the layout suite renders the real screen to prove a row can never overflow.
+The agent loop is tested directly with a scripted fake provider, so multi-turn
+tool chaining, permission modes, the turn ceiling, aborts, malformed tool
+arguments, and provider failures are deterministic and instant.
 
-**The agent loop is tested directly.** `test/loop.test.ts` drives `runAgent`
-with a scripted fake provider, so multi-turn tool chaining, permission modes,
-the turn ceiling, aborts, malformed tool arguments and provider failures are all
-deterministic and instant — no model, no network.
+Two suites exist specifically to prevent documentation drift: one reads the real
+key handlers and command registry and requires them to be documented in both
+`/help` and this README; the layout suite renders the real screen to prove that a
+row can never overflow.
 
-**The highlighter is tested by its invariants**, not by golden output: a corpus
-in every supported language must round-trip character-for-character, malformed
-input must never throw, block comments and template literals must carry across
-lines, and a `//` inside a string must not become a comment.
+CI runs typechecking, the full suite, and a build on Node 22 and Node 24, then
+boots the compiled CLI. See the **Actions** tab for the latest run (workflow
+badges do not render on private repositories).
 
-**35 end-to-end TUI checks** run the real `<App />` on a fake TTY (a
-`PassThrough` for stdin, a capturing `Writable` for stdout) and assert against
-the component's committed state rather than scraping ANSI output. They cover the
-permission prompt and denial path, session persistence to disk, scrolling, the
-command palette, both pickers opening *and closing*, slash autocomplete,
-`/compact` including its persistence to the log, and quitting.
-
-There are also two debug probes kept around because they earn their place:
-`npx tsx test/debug-keys.ts` (does this keybinding reach the app?) and
-`npx tsx test/debug-picker.ts` (does this overlay open and close?). Both found
-real bugs.
-
-`test/capture.tsx` generates the screenshot at the top of this README by running
-a genuine session and re-rendering the real components with the captured state —
-so the image is exact, not a hand-drawn mockup.
+The screenshot at the top of this README is generated by `test/capture.tsx`,
+which runs a genuine session and re-renders the real components with the captured
+state.
 
 ---
 
@@ -575,13 +576,13 @@ so the image is exact, not a hand-drawn mockup.
 npm run dev            # run from source (tsx)
 npm run typecheck      # src + test, strict
 npm test               # unit + integration
-npm run test:smoke     # end-to-end TUI (needs a live provider)
+npm run test:smoke     # end-to-end TUI (requires a live provider)
 npm run build          # compile to dist/
 ```
 
 ### Adding a tool
 
-Drop a file in `src/agent/tools/`, implement the `Tool` interface, and register
+Create a file in `src/agent/tools/`, implement the `Tool` interface, and register
 it in `tools/index.ts`. Name it after its `permission` key so the policy lines up
 without a translation table.
 
@@ -600,25 +601,39 @@ export const myTool: Tool = {
 
 ---
 
-## Known limitations
+## Contributing
 
-Honest list, not a wishlist:
+1. Fork the repository and create a topic branch.
+2. Keep changes focused; include tests for behaviour changes.
+3. Run `npm run typecheck` and `npm test` before opening a pull request.
+4. Describe the problem and the approach in the pull request.
+
+Bug reports and feature requests are welcome via GitHub Issues. For security
+issues, please report them privately rather than opening a public issue.
+
+---
+
+## Limitations
+
+An honest list, not a roadmap:
 
 - **Markdown is deliberately minimal** — fenced code (highlighted), headings,
-  bullets, blockquotes, inline code/bold/italic. No tables, links or nested lists.
-- **No mouse capture.** Ink has no mouse API, so the drag-to-select and clickable
-  overlay affordances from other TUIs are not available. Keyboard only.
-- **The sidebar needs width.** `auto` hides it below 100 columns; force it with
-  `tui.sidebar: true` and the composer will still be usable, but code wraps more.
-- **The highlighter covers a fixed language set** — JS/TS, JSON, Python, shell,
-  YAML and diff. Other languages render plain rather than being guessed at.
-- **Transient tool output is not highlighted** — only fenced code in the answer
-  is. Tool output is shown verbatim so you see exactly what the command printed.
-- **`grep` uses `rg` when available**, and falls back to a JS walker otherwise
-  (slower; skips files over 4 MB and build/vendor directories).
-- **One transport: `openai-compatible`.** No native Anthropic Messages API, no
-  OAuth flows.
-- **Images/PDFs are typed but not plumbed** from the TUI into requests.
+  bullets, blockquotes, inline code/bold/italic. No tables, links, or nested
+  lists.
+- **No mouse capture.** Ink has no mouse API, so selection and clickable overlays
+  are unavailable. The interface is keyboard-only.
+- **The sidebar needs width.** `auto` hides it below 100 columns. It can be
+  forced with `tui.sidebar: true`, but code will wrap more.
+- **The highlighter supports a fixed language set** — JavaScript/TypeScript,
+  JSON, Python, shell, YAML, and diff. Unknown languages render plain rather than
+  being guessed at.
+- **Tool output is not highlighted**, only fenced code in the answer. Tool output
+  is shown verbatim.
+- **`grep` prefers `rg`** and falls back to a JavaScript walker (slower; skips
+  files over 4 MB and build/vendor directories).
+- **One transport: `openai-compatible`.** There is no native Anthropic Messages
+  API and no OAuth flow.
+- **Images and PDFs** are typed but not yet plumbed from the TUI into requests.
 
 ---
 
