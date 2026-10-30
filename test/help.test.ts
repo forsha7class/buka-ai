@@ -20,6 +20,7 @@ import { HELP_TEXT } from "../src/tui/app.js";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 const APP_SOURCE = readFileSync(`${root}src/tui/app.tsx`, "utf8");
+const COMMANDS_SOURCE = readFileSync(`${root}src/tui/commands.ts`, "utf8");
 const README = readFileSync(`${root}README.md`, "utf8");
 
 /** Every control+letter binding the key handler actually implements. */
@@ -75,36 +76,38 @@ describe("keybinding documentation", () => {
   });
 });
 
+/** Every command registered in `commands.ts`. */
+function registeredCommands(): string[] {
+  const start = COMMANDS_SOURCE.indexOf("export const COMMANDS");
+  const end = COMMANDS_SOURCE.indexOf("const ALIASES");
+  const body = COMMANDS_SOURCE.slice(start, end);
+  const names = new Set<string>();
+  for (const match of body.matchAll(/name: "([a-z]+)"/g)) names.add(match[1]!);
+  return [...names].sort();
+}
+
+function documentedCommands(): string[] {
+  return [...HELP_TEXT.matchAll(/^\s+\/([a-z]+)/gm)].map((match) => match[1]!);
+}
+
 describe("slash command documentation", () => {
-  it("documents every slash command the dispatcher handles", () => {
-    const dispatchStart = APP_SOURCE.indexOf("function handleSlashCommand");
-    const dispatchEnd = APP_SOURCE.indexOf("function relativeTime");
-    const body = APP_SOURCE.slice(dispatchStart, dispatchEnd);
-
-    const handled = new Set<string>();
-    for (const match of body.matchAll(/case "([a-z]+)":/g)) {
-      handled.add(match[1]!);
+  it("finds a real registry", () => {
+    const commands = registeredCommands();
+    assert.ok(commands.length >= 10, `expected a real registry, got ${commands.join(",")}`);
+    for (const expected of ["help", "model", "models", "compact", "sessions", "theme"]) {
+      assert.ok(commands.includes(expected), `/${expected} should be registered`);
     }
-    // Aliases that intentionally share one entry, and the fallback branch.
-    const aliases: Record<string, string> = { quit: "exit" };
-    const documented = new Set(
-      [...HELP_TEXT.matchAll(/^\s+\/([a-z]+)/gm)].map((match) => match[1]!),
-    );
-
-    const missing = [...handled]
-      .map((command) => aliases[command] ?? command)
-      .filter((command) => !documented.has(command));
-
-    assert.deepEqual(missing, [], `handled but undocumented: ${missing.join(", ")}`);
   });
 
-  it("does not document a command that is not handled", () => {
-    const dispatchStart = APP_SOURCE.indexOf("function handleSlashCommand");
-    const dispatchEnd = APP_SOURCE.indexOf("function relativeTime");
-    const body = APP_SOURCE.slice(dispatchStart, dispatchEnd);
+  it("documents every registered slash command", () => {
+    const documented = new Set(documentedCommands());
+    const missing = registeredCommands().filter((command) => !documented.has(command));
+    assert.deepEqual(missing, [], `registered but undocumented: ${missing.join(", ")}`);
+  });
 
-    const documented = [...HELP_TEXT.matchAll(/^\s+\/([a-z]+)/gm)].map((match) => match[1]!);
-    const missing = documented.filter((command) => !body.includes(`case "${command}":`));
-    assert.deepEqual(missing, [], `documented but not handled: ${missing.join(", ")}`);
+  it("does not document a command that is not registered", () => {
+    const registered = new Set(registeredCommands());
+    const missing = documentedCommands().filter((command) => !registered.has(command));
+    assert.deepEqual(missing, [], `documented but not registered: ${missing.join(", ")}`);
   });
 });

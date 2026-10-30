@@ -46,7 +46,15 @@ const PermissionSchema = z.object({
 export type PermissionConfig = z.infer<typeof PermissionSchema>;
 
 const TuiSchema = z.object({
-  theme: z.enum(["dark", "light"]).default("dark"),
+  /** `auto` follows the terminal background; a named theme always wins. */
+  theme: z
+    .enum(["auto", "dark", "light", "buka", "opencode", "hermes", "classic"])
+    .default("auto"),
+  /** `auto` shows the sidebar only on wide terminals. */
+  sidebar: z.union([z.literal("auto"), z.boolean()]).default("auto"),
+  animations: z.boolean().default(true),
+  /** `queue` keeps typing and running while the agent is busy. */
+  busyInput: z.enum(["queue", "block"]).default("queue"),
   showThinking: z.boolean().default(true),
   showTokenUsage: z.boolean().default(true),
 });

@@ -308,7 +308,13 @@ const STARTER_CONFIG = `{
   },
 
   "tui": {
-    "theme": "dark",
+    // auto | dark | light | buka | opencode | hermes | classic
+    "theme": "auto",
+    // auto hides the sidebar on terminals narrower than 100 columns
+    "sidebar": "auto",
+    "animations": true,
+    // queue: Enter while the agent is running adds a message for the next turn
+    "busyInput": "queue",
     "showThinking": true,
     "showTokenUsage": true
   }

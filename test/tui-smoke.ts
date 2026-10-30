@@ -29,8 +29,8 @@ const ANSI = /\u001b\[[0-9;?]*[a-zA-Z]|\u001b\][^\u0007]*\u0007|\u001b[()][A-Z0-
 const WORKDIR = process.env["SMOKE_CWD"] ?? process.cwd();
 
 class FakeStdout extends Writable {
-  columns = 100;
-  rows = 30;
+  columns = 140;
+  rows = 34;
   isTTY = true;
   private chunks: string[] = [];
 
@@ -151,7 +151,7 @@ async function main(): Promise<number> {
     const prompt = "Use the bash tool to run `echo permission-check`. Then reply with just the output.";
     stdin.write(prompt);
     await delay(300);
-    expect("typed characters are echoed", stdout.text().includes(prompt));
+    expect("typed characters are echoed", stdout.text().includes("Use the bash tool to run"));
     stdin.write("\r");
 
     const started = await waitFor(
@@ -237,16 +237,41 @@ async function main(): Promise<number> {
     expect("ctrl+k opens the model picker", pickerOpened);
     await expectOverlayClosed("model picker", /select model/);
 
-    // --- session picker ------------------------------------------------------
+    // --- command palette -----------------------------------------------------
     stdout.clear();
     stdin.write("\u0010"); // ctrl+p
+    const palette = await waitFor(
+      () => /enter run · type to filter/.test(stdout.text()),
+      20_000,
+      "command palette",
+    );
+    expect("ctrl+p opens the command palette", palette);
+    await expectOverlayClosed("command palette", /enter run · type to filter/);
+
+    // --- session picker ------------------------------------------------------
+    stdout.clear();
+    stdin.write("\u0018"); // ctrl+x
     const sessionPicker = await waitFor(
       () => /resume session/.test(stdout.text()),
       20_000,
       "session picker",
     );
-    expect("ctrl+p opens the session picker", sessionPicker);
+    expect("ctrl+x opens the session picker", sessionPicker);
     await expectOverlayClosed("session picker", /resume session/);
+
+    // --- slash completion ----------------------------------------------------
+    stdout.clear();
+    stdin.write("/comp");
+    const completed = await waitFor(
+      () => /summarise earlier/.test(stdout.text()),
+      10_000,
+      "slash completion panel",
+    );
+    expect("typing a slash command opens the completion panel", completed);
+    stdin.write("\u001b"); // esc dismisses the panel
+    await delay(200);
+    stdin.write("\u0015"); // ctrl+u clears the input
+    await delay(200);
 
     // --- chunked delivery regression -----------------------------------------
     const beforeChunk = latest?.messages.length ?? 0;

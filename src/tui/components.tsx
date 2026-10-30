@@ -1,10 +1,8 @@
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 
-import type { AppState, Line, RunStatus } from "./types.js";
-import { palette } from "./types.js";
-import { editorRows, visualRows, type EditorState } from "./editor.js";
-import { padToWidth, stringWidth, truncateToWidth } from "./text.js";
+import type { Line, Segment, Style } from "./types.js";
+import { stringWidth, takeWidth, truncateToWidth } from "./text.js";
 
 export function Segments({ segments }: { segments: Line }): ReactElement {
   if (segments.length === 0) return <Text> </Text>;
@@ -41,253 +39,50 @@ export function LineList({
   );
 }
 
-const STATUS_LABEL: Record<RunStatus, { text: string; color: string }> = {
-  idle: { text: "ready", color: palette.ok },
-  thinking: { text: "thinking", color: palette.accent },
-  responding: { text: "responding", color: palette.user },
-  tool: { text: "running tool", color: palette.tool },
-  permission: { text: "waiting for you", color: palette.warn },
-};
+/**
+ * Builds one display row of exactly `width` cells from styled parts.
+ *
+ * Parts are laid out left to right and truncated to the remaining budget; the
+ * tail is filled with `pad` so a background colour can span the full pane
+ * without the row ever changing height.
+ */
+export function row(width: number, pad: Style | undefined, parts: Segment[]): Line {
+  const out: Line = [];
+  let used = 0;
 
-export function Header({
-  state,
-  width,
-  session,
-}: {
-  state: AppState;
-  width: number;
-  session?: string;
-}): ReactElement {
-  const status = STATUS_LABEL[state.status];
-  const totals = state.totals;
-  const tokens =
-    totals.prompt + totals.completion > 0
-      ? `  ${formatTokens(totals.prompt + totals.completion)} tok` +
-        (totals.cached > 0 ? ` (${formatTokens(totals.cached)} cached)` : "")
-      : "";
+  for (const part of parts) {
+    const remaining = width - used;
+    if (remaining <= 0) break;
 
-  const badge = " buka ai ";
-  const statusText = `● ${status.text} `;
-  const model = `${state.modelRef}${state.model && state.model !== state.modelRef ? ` · ${state.model}` : ""}${tokens}`;
-  const sessionText = session && session !== "new session" ? session : "";
+    const partWidth = stringWidth(part.text);
+    const text =
+      partWidth <= remaining
+        ? part.text
+        : remaining >= 4
+          ? truncateToWidth(part.text, remaining)
+          : takeWidth(part.text, remaining);
 
-  // Budget the row explicitly: the viewport height math assumes the header is
-  // exactly one line, so every part is truncated rather than allowed to wrap.
-  //
-  // The target is `width - 1` rather than `width`: a one-cell margin absorbs
-  // any disagreement with the terminal over the width of ambiguous characters
-  // (the status dot), which would otherwise truncate the status text.
-  const target = Math.max(12, width - 1);
-  const available = Math.max(8, target - stringWidth(badge) - stringWidth(statusText) - 2);
-  const sessionBudget = sessionText ? Math.min(stringWidth(sessionText), Math.floor(available / 3)) : 0;
-  const modelBudget = Math.max(8, available - (sessionBudget > 0 ? sessionBudget + 3 : 0));
-  const modelText = truncateToWidth(model, modelBudget);
-  const sessionPart = sessionBudget > 0 ? ` · ${truncateToWidth(sessionText, sessionBudget)}` : "";
-  const gap = Math.max(
-    1,
-    target -
-      stringWidth(badge) -
-      stringWidth(modelText) -
-      stringWidth(sessionPart) -
-      stringWidth(statusText),
-  );
-
-  return (
-    <Text wrap="truncate">
-      <Text backgroundColor={palette.border} color={palette.accent} bold>
-        {badge}
-      </Text>
-      <Text color={palette.dim}>{` ${modelText}`}</Text>
-      <Text color={palette.dimmer}>{sessionPart}</Text>
-      <Text>{" ".repeat(gap)}</Text>
-      <Text color={status.color} bold>
-        {statusText}
-      </Text>
-    </Text>
-  );
-}
-
-export function PromptInput({
-  editor,
-  width,
-  placeholder,
-  disabled,
-}: {
-  editor: EditorState;
-  width: number;
-  placeholder: string;
-  disabled: boolean;
-}): ReactElement {
-  const inner = Math.max(1, width - 2);
-  const rows = editorRows(editor.value, inner);
-  const ranges = visualRows(editor.value, inner);
-
-  const cursorRowIndex = Math.max(
-    0,
-    ranges.findIndex((range) => editor.cursor >= range.start && editor.cursor <= range.end),
-  );
-
-  if (editor.value.length === 0 && placeholder.length > 0) {
-    return (
-      <Box>
-        <Text color={palette.accent} bold>{"> "}</Text>
-        <Text color={palette.dimmer}>{truncateToWidth(placeholder, inner)}</Text>
-        {!disabled ? <Text inverse> </Text> : null}
-      </Box>
-    );
+    if (text.length > 0) {
+      out.push(part.style ? { text, style: part.style } : { text });
+      used += stringWidth(text);
+    }
+    if (partWidth > remaining) break;
   }
 
-  return (
-    <Box flexDirection="column">
-      {rows.map((row, index) => {
-        if (index !== cursorRowIndex) {
-          return (
-            <Box key={index}>
-              <Text color={palette.accent} bold wrap="truncate">{index === 0 ? "> " : "  "}</Text>
-              <Text color={palette.text} wrap="truncate">{row}</Text>
-            </Box>
-          );
-        }
+  if (used < width) {
+    const padding = " ".repeat(width - used);
+    out.push(pad ? { text: padding, style: pad } : { text: padding });
+  }
 
-        const column = editor.cursor - (ranges[index]?.start ?? 0);
-        const before = row.slice(0, column);
-        const at = row.slice(column, column + 1);
-        const after = row.slice(column + 1);
-
-        return (
-          <Box key={index}>
-            <Text color={palette.accent} bold wrap="truncate">{index === 0 ? "> " : "  "}</Text>
-            <Text color={palette.text} wrap="truncate">{before}</Text>
-            <Text inverse color={palette.text} wrap="truncate">
-              {at.length > 0 ? at : " "}
-            </Text>
-            <Text color={palette.text} wrap="truncate">{after}</Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
+  return out;
 }
 
-export function StatusBar({
-  state,
-  width,
-  hint,
-}: {
-  state: AppState;
-  width: number;
-  hint: string;
-}): ReactElement {
-  const left =
-    state.status === "idle"
-      ? hint
-      : state.status === "permission"
-        ? "y allow · n deny · a always allow"
-        : "esc stop";
-
-  const right =
-    state.lastStop === "max-turns"
-      ? "turn limit reached"
-      : state.turn > 0
-        ? `turn ${state.turn}`
-        : "";
-
-  const rightWidth = stringWidth(right);
-  const target = Math.max(8, width - 1);
-  const available = Math.max(4, target - rightWidth);
-  const leftText = truncateToWidth(left, available);
-  const padding = Math.max(1, target - stringWidth(leftText) - rightWidth);
-  return (
-    <Text wrap="truncate">
-      <Text color={palette.dimmer}>{leftText}</Text>
-      <Text color={palette.dimmer}>{`${" ".repeat(padding)}${right}`}</Text>
-    </Text>
-  );
+/** An empty full-width row, useful for padding a panel to its height. */
+export function blankRow(width: number, pad: Style | undefined): Line {
+  return row(width, pad, []);
 }
 
-export function PermissionPrompt({
-  state,
-  width,
-}: {
-  state: AppState;
-  width: number;
-}): ReactElement {
-  const request = state.pendingPermission!;
-  return (
-    <Box flexDirection="column">
-      <Text color={palette.warn} bold>
-        {"  ⚠ permission required  "}
-        <Text color={palette.tool}>{request.tool}</Text>
-      </Text>
-      <Text color={palette.dim}>{`  ${truncateToWidth(request.preview, Math.max(10, width - 4))}`}</Text>
-    </Box>
-  );
-}
-
-export function ModelPicker({
-  items,
-  index,
-  width,
-  title = "select model",
-}: {
-  items: Array<{ reference: string; detail: string }>;
-  index: number;
-  width: number;
-  title?: string;
-}): ReactElement {
-  const height = 12;
-  const half = Math.floor(height / 2);
-  const start = Math.max(0, Math.min(items.length - height, index - half));
-  const visible = items.slice(start, start + height);
-  // The bordered box spends two columns on the frame; budget the content to the
-  // remaining width so a long reference or detail never wraps.
-  const inner = Math.max(10, width - 2);
-  const detailWidth = Math.max(0, Math.min(22, Math.floor(inner / 4)));
-  const referenceWidth = Math.max(8, inner - 3 - 1 - detailWidth);
-
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor={palette.accent} width={width}>
-      <Text color={palette.accent} bold wrap="truncate">
-        {truncateToWidth(` ${title} (${items.length}) `, inner)}
-      </Text>
-      {visible.map((model, offset) => {
-        const absolute = start + offset;
-        const selected = absolute === index;
-        return (
-          <Text key={model.reference} {...(selected ? { backgroundColor: palette.selection } : {})} wrap="truncate">
-            <Text color={selected ? palette.accent : palette.dim}>{selected ? " ▸ " : "   "}</Text>
-            <Text color={palette.text}>
-              {padToWidth(truncateToWidth(model.reference, referenceWidth), referenceWidth)}
-            </Text>
-            <Text color={palette.dimmer}>{` ${truncateToWidth(model.detail, detailWidth)}`}</Text>
-          </Text>
-        );
-      })}
-    </Box>
-  );
-}
-
-export function Banner({ state, width }: { state: AppState; width: number }): ReactElement {
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={palette.accent} bold>
-          {"buka ai"}
-        </Text>
-        <Text color={palette.dimmer}>{`  ${state.modelRef} · terminal coding agent`}</Text>
-      </Box>
-      <Text color={palette.dim}>
-        {truncateToWidth(
-          "Enter send · Alt+Enter newline · Esc stop · Ctrl+P sessions · Ctrl+K model · /help",
-          Math.max(10, width),
-        )}
-      </Text>
-    </Box>
-  );
-}
-
-function formatTokens(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 1_000_000) return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+/** A horizontal rule made of a single repeated glyph. */
+export function ruleRow(width: number, glyph: string, style: Style): Line {
+  return [{ text: glyph.repeat(Math.max(1, width)), style }];
 }

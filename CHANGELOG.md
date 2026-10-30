@@ -9,12 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A split-pane shell.** On terminals 100 columns or wider a sidebar shows the
+  session, model and wire name, a context-usage bar, the files the agent has
+  changed, and the active key hints. Narrow terminals keep the single-column
+  transcript. A top bar carries the working directory and git branch; the prompt
+  is a bordered composer and the status line sits underneath it.
+- **Themes that are actually applied.** `tui.theme` was accepted and ignored; it
+  now selects a palette: `buka` (default), `opencode`, `hermes`, `light`,
+  `classic`, or `auto` to follow the terminal background. Switch at runtime with
+  `/theme`.
+- **A command registry** (`src/tui/commands.ts`) shared by the dispatcher, the
+  in-app `/help`, the slash autocomplete and the command palette, so the four can
+  no longer disagree.
+- **Slash autocomplete and a command palette.** Typing `/` opens a floating list
+  with descriptions (`Tab` completes, `Enter` runs); `Ctrl+P` opens the full
+  palette. Both filter as you type.
+- **A message queue.** `Enter` while the agent is running queues the message
+  instead of dropping it; the queue is shown above the composer and drains after
+  the current turn. Configurable with `tui.busyInput` (`queue` or `block`).
+- **Diff previews.** `edit` and `write` attach a unified diff to their result
+  metadata; the transcript shows the changed lines with `+added` / `−removed`
+  counts, and a resumed session replays the same preview.
+- **An activity line and welcome banner.** A spinner, the current action and
+  elapsed time sit under the composer; the empty transcript shows a card with the
+  model, cwd, tool count and key hints.
+- **New config:** `tui.sidebar` (`auto` | boolean) and `tui.animations`.
+- **New keybinding:** `Ctrl+B` toggles the sidebar.
 - A drift guard for the keybinding and slash-command documentation. It reads the
-  real handlers out of `app.tsx` and requires every binding and every command to
-  appear in both the in-app `/help` and the README table.
+  real handlers out of `app.tsx` and the registry out of `commands.ts`, and
+  requires every binding and every command to appear in both the in-app `/help`
+  and the README table.
+
+### Changed
+
+- **Keybindings now follow the OpenCode/Hermes convention.** `Ctrl+P` is the
+  command palette (it used to open the session picker), `Ctrl+X` opens the
+  session picker — or the queue when messages are waiting — and `Ctrl+K` still
+  opens the model picker.
+- The default theme is charcoal with an amber accent; the previous lavender
+  palette is available as `theme: "classic"`.
+- `tui.theme: "dark"` / `"light"` from older configs still work and map onto the
+  new themes.
 
 ### Fixed
 
+- `tui.theme` was silently ignored by the TUI; colour is now resolved from the
+  config and re-applied on every render.
 - `Ctrl+D`, `Ctrl+G`, `Home` and `End` were implemented but absent from both
   `/help` and the README. `Ctrl+J` was missing from `/help`.
 - The `/compact` description still claimed it replaced "the in-memory context";

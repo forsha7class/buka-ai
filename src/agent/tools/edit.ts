@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { ToolError, type Tool, type ToolResult } from "./types.js";
+import { simpleDiff } from "./diff.js";
 import { asRecord, displayPath, requireString, resolvePath } from "./shared.js";
 
 /**
@@ -108,7 +109,11 @@ export const editTool: Tool = {
         (delta !== 0 ? ` (${delta > 0 ? "+" : ""}${delta} lines)` : "") +
         ".",
       summary: `${replaced} replacement${replaced === 1 ? "" : "s"}`,
-      metadata: { path: filePath, replacements: replaced },
+      metadata: {
+        path: filePath,
+        replacements: replaced,
+        diff: simpleDiff(original, updated, shown),
+      },
     });
   },
 };

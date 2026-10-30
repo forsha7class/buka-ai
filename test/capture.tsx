@@ -12,16 +12,18 @@ import { PassThrough, Writable } from "node:stream";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Box, Text, render, renderToString } from "ink";
-import { createElement, type ReactNode } from "react";
+import { render, renderToString } from "ink";
+import { createElement } from "react";
 
 import { createRuntime } from "../src/runtime.js";
 import { SessionStore } from "../src/session/store.js";
 import { App } from "../src/tui/app.js";
 import { messagesToLines } from "../src/tui/blocks.js";
-import { Header, LineList, PromptInput, StatusBar } from "../src/tui/components.js";
-import { createEditor, editorRows } from "../src/tui/editor.js";
-import { initialState, palette, type AppState } from "../src/tui/types.js";
+import { extractChangedFiles } from "../src/tui/changes.js";
+import { TuiView } from "../src/tui/chrome.js";
+import { createEditor } from "../src/tui/editor.js";
+import { computeLayout } from "../src/tui/layout.js";
+import { initialState, type AppState } from "../src/tui/types.js";
 
 /** Absorbs output: this run exists only to produce state. */
 class Sink extends Writable {
@@ -117,35 +119,31 @@ async function main(): Promise<void> {
   // top of the transcript (shows the prompt and the first tool calls) and once
   // pinned to the bottom (shows the result). One run, two README frames.
   const showThinking = runtime.config.tui.showThinking;
-  const lines = messagesToLines(latest.messages, { width: columns, showThinking });
-  const inputRows = Math.min(Math.max(1, editorRows("", columns - 2).length), 6);
-  const messageHeight = Math.max(3, rows - 3 - inputRows);
-  const maxScroll = Math.max(0, lines.length - messageHeight);
+  const layout = computeLayout({ columns, rows, editorRows: 1 });
+  const lines = messagesToLines(latest.messages, { width: layout.main, showThinking });
+  const maxScroll = Math.max(0, lines.length - layout.transcript);
 
   const renderFrame = (offset: number): string =>
     renderToString(
-      createElement(
-        Box,
-        { flexDirection: "column", width: columns, height: rows },
-        createElement(Header, { state: latest, width: columns, session: sessionTitle }),
-        createElement(
-          Box,
-          { flexDirection: "column", height: messageHeight, overflow: "hidden" },
-          createElement(LineList, { lines, offset, height: messageHeight }),
-        ),
-        createElement(Text, { color: palette.border }, "─".repeat(Math.max(1, columns))),
-        createElement(PromptInput, {
-          editor: createEditor(),
-          width: columns,
-          placeholder: "ask buka to do something, or /help",
-          disabled: false,
-        }),
-        createElement(StatusBar, {
-          state: latest,
-          width: columns,
-          hint: "Enter send · Alt+Enter newline · Ctrl+P sessions · /help",
-        }),
-      ) as ReactNode,
+      createElement(TuiView, {
+        state: latest,
+        layout,
+        lines,
+        offset,
+        editor: createEditor(),
+        sessionTitle,
+        cwd,
+        version: "0.3.0",
+        toolCount: 7,
+        changedFiles: extractChangedFiles(latest),
+        dialog: null,
+        completing: null,
+        hint: "enter send · alt+enter newline · ctrl+p palette · /help",
+        spinnerTick: 0,
+        runStartedAt: null,
+        now: Date.now(),
+        showTokens: true,
+      }),
       { columns },
     );
 

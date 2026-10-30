@@ -99,6 +99,7 @@ function toToolView(result: ToolResultRecord): ToolView {
     status: result.isError ? "error" : "done",
     output: result.output,
     ...(result.summary !== undefined ? { summary: result.summary } : {}),
+    ...(result.diff !== undefined ? { diff: result.diff } : {}),
     expanded: false,
   };
 }

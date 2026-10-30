@@ -1,7 +1,7 @@
 {
   "name": "buka-ai",
   "version": "0.3.0",
-  "description": "buka ai — terminal-native AI coding agent (chat CLI ala opencode)",
+  "description": "buka ai — terminal-native AI coding agent with a full-screen TUI",
   "type": "module",
   "bin": {
     "buka": "dist/cli.js"

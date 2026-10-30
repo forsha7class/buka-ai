@@ -33,6 +33,8 @@ export interface ToolResultRecord {
   output: string;
   isError: boolean;
   summary?: string;
+  /** Unified diff for edit/write, kept so a resumed transcript still shows it. */
+  diff?: string;
 }
 
 /**

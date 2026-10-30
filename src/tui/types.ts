@@ -27,6 +27,10 @@ export interface ToolView {
   status: "running" | "done" | "error";
   output?: string;
   summary?: string;
+  /** Wall-clock duration, measured by the TUI when the tool returns. */
+  durationMs?: number;
+  /** Unified diff for edit/write tools, rendered as a preview. */
+  diff?: string;
   expanded: boolean;
 }
 
@@ -98,6 +102,8 @@ export interface AppState {
   totals: { prompt: number; completion: number; cached: number };
   turn: number;
   pendingPermission: PendingPermission | null;
+  /** Messages typed while a turn was running, in submission order. */
+  queued: string[];
   /**
    * Absolute index of the first visible line, plus whether the view is pinned
    * to the newest output. `pinned` wins over `offset` so streaming keeps the
@@ -116,7 +122,15 @@ export type Action =
   | { type: "model"; model: string }
   | { type: "turn"; turn: number }
   | { type: "tool_start"; id: string; name: string; preview: string }
-  | { type: "tool_end"; id: string; output: string; isError: boolean; summary?: string }
+  | {
+      type: "tool_end";
+      id: string;
+      output: string;
+      isError: boolean;
+      summary?: string;
+      durationMs?: number;
+      diff?: string;
+    }
   | { type: "compacted"; summary: string }
   | { type: "permission"; tool: string; preview: string }
   | { type: "permission_clear" }
@@ -130,24 +144,16 @@ export type Action =
   | { type: "toggle_tool"; messageId: string; id: string }
   | { type: "set_model"; modelRef: string; model: string }
   | { type: "seed"; messages: MessageView[]; modelRef: string; model: string }
+  | { type: "queue_add"; text: string }
+  | { type: "queue_remove"; index: number }
+  | { type: "queue_shift" }
   | { type: "reset" };
 
-export const palette = {
-  user: "#7dd3fc",
-  accent: "#c4b5fd",
-  text: "#e5e7eb",
-  tool: "#f0abfc",
-  ok: "#6ee7b7",
-  error: "#fca5a5",
-  warn: "#fcd34d",
-  dim: "#6b7280",
-  dimmer: "#4b5563",
-  border: "#374151",
-  code: "#d8b4fe",
-  codeBg: "#1f2937",
-  thinking: "#94a3b8",
-  selection: "#312e81",
-} as const;
+/**
+ * The theme lives in `theme.ts` now; this re-export keeps the renderers and
+ * the screenshot generator importing from one place.
+ */
+export { palette } from "./theme.js";
 
 export function initialState(options: {
   model: string;
@@ -164,6 +170,7 @@ export function initialState(options: {
     totals: { prompt: 0, completion: 0, cached: 0 },
     turn: 0,
     pendingPermission: null,
+    queued: [],
     scroll: { pinned: true, offset: 0 },
     error: null,
     lastStop: null,
@@ -242,6 +249,8 @@ export function reducer(state: AppState, action: Action): AppState {
                   status: action.isError ? ("error" as const) : ("done" as const),
                   output: action.output,
                   ...(action.summary !== undefined ? { summary: action.summary } : {}),
+                  ...(action.durationMs !== undefined ? { durationMs: action.durationMs } : {}),
+                  ...(action.diff !== undefined ? { diff: action.diff } : {}),
                 },
               }
             : part,
@@ -334,6 +343,15 @@ export function reducer(state: AppState, action: Action): AppState {
     case "set_model":
       return { ...state, modelRef: action.modelRef, model: action.model };
 
+    case "queue_add":
+      return { ...state, queued: [...state.queued, action.text] };
+
+    case "queue_remove":
+      return { ...state, queued: state.queued.filter((_, index) => index !== action.index) };
+
+    case "queue_shift":
+      return { ...state, queued: state.queued.slice(1) };
+
     case "seed":
       return {
         ...state,
@@ -346,6 +364,7 @@ export function reducer(state: AppState, action: Action): AppState {
         turn: 0,
         error: null,
         lastStop: null,
+        queued: [],
         scroll: { pinned: true, offset: 0 },
       };
 

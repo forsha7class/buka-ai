@@ -1,6 +1,7 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
+import { render, useApp, useInput, useWindowSize } from "ink";
 import {
   useCallback,
   useEffect,
@@ -8,28 +9,27 @@ import {
   useReducer,
   useRef,
   useState,
-  type Dispatch,
   type ReactElement,
-  type RefObject,
 } from "react";
 
 import { runAgent } from "../agent/loop.js";
 import { createDefaultTools } from "../agent/tools/index.js";
-import type { ToolRegistry } from "../agent/tools/registry.js";
 import type { PermissionRequest } from "../agent/tools/types.js";
 import type { ChatMessage, ToolCall } from "../provider/types.js";
 import type { Runtime } from "../runtime.js";
 import { SessionStore, type Session, type StoredPart, type ToolResultRecord } from "../session/store.js";
+import { readGitBranch } from "../util/git.js";
 import { messagesToLines } from "./blocks.js";
+import { extractChangedFiles } from "./changes.js";
+import { TuiView, type CompletionView } from "./chrome.js";
 import {
-  Banner,
-  Header,
-  LineList,
-  ModelPicker,
-  PermissionPrompt,
-  PromptInput,
-  StatusBar,
-} from "./components.js";
+  commandItems,
+  helpText,
+  matchingCommands,
+  runCommand,
+  type CommandContext,
+} from "./commands.js";
+import type { DialogSpec, PickerItem } from "./dialogs.js";
 import {
   backspace,
   createEditor,
@@ -45,15 +45,14 @@ import {
   moveVertical,
   type EditorState,
 } from "./editor.js";
+import { computeLayout, sidebarWidth, type SidebarMode } from "./layout.js";
+import { setActiveTheme, resolveTheme, themeNames } from "./theme.js";
 import { sessionToViews } from "./session-view.js";
 import {
   initialState,
   messageReasoning,
-  messageText,
   messageTools,
-  palette,
   reducer,
-  type Action,
   type AppState,
 } from "./types.js";
 
@@ -70,12 +69,7 @@ export interface TuiOptions {
   onState?: (state: AppState) => void;
 }
 
-type Overlay = null | "models" | "sessions";
-
-interface PickerItem {
-  reference: string;
-  detail: string;
-}
+type Overlay = null | "models" | "sessions" | "commands" | "queue";
 
 const COMPACT_PROMPT = [
   "Summarise the conversation above so it can replace the transcript as working context.",
@@ -88,38 +82,24 @@ const COMPACT_PROMPT = [
   "Be specific about paths, symbol names and commands. Aim for under 500 words.",
 ].join("\n");
 
-export const HELP_TEXT = [
-  "slash commands",
-  "  /help              show this help",
-  "  /model [ref]       switch model (no argument opens the picker)",
-  "  /models            list every available model",
-  "  /sessions          browse and resume past sessions",
-  "  /new               start a fresh session",
-  "  /rename <title>    name the current session",
-  "  /clear             clear the visible transcript (session file is kept)",
-  "  /compact           summarise earlier turns to shrink the context window",
-  "  /tools             list the tools the agent can use",
-  "  /export [file]     write the conversation to a markdown file",
-  "  /exit              quit",
-  "",
-  "keys",
-  "  Enter              send",
-  "  Alt+Enter / Ctrl+J new line",
-  "  Esc                stop the current run",
-  "  PgUp / PgDn        scroll the transcript",
-  "  Ctrl+K             model picker",
-  "  Ctrl+P             session picker",
-  "  Ctrl+T             expand / collapse thinking",
-  "  Ctrl+O             expand / collapse tool output",
-  "  Up / Down          prompt history when the cursor is at the edge",
-  "  Home / End         start / end of the current line",
-  "  Ctrl+A / Ctrl+E    start / end of line",
-  "  Ctrl+U / Ctrl+W    delete to line start / delete word",
-  "  Ctrl+D             delete the character under the cursor",
-  "  Ctrl+G             jump back to the newest output",
-  "  Ctrl+L             clear the transcript",
-  "  Ctrl+C             stop, then clear the input, then quit",
-].join("\n");
+/** Re-exported for the documentation drift test. */
+export const HELP_TEXT = helpText();
+
+const OVERLAY_TITLES: Record<Exclude<Overlay, null>, string> = {
+  models: "select model",
+  sessions: "resume session",
+  commands: "commands",
+  queue: "queued messages",
+};
+
+const OVERLAY_HINTS: Record<Exclude<Overlay, null>, string> = {
+  models: "enter select · type to filter · esc close",
+  sessions: "enter resume · type to filter · esc close",
+  commands: "enter run · type to filter · esc close",
+  queue: "enter remove · esc close",
+};
+
+const MAX_COMPLETIONS = 6;
 
 export async function launchTui(options: TuiOptions): Promise<number> {
   const app = render(<App {...options} />, {
@@ -164,8 +144,23 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     items: [],
     index: 0,
   });
+  const [filter, setFilter] = useState("");
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const [completionIndex, setCompletionIndex] = useState(0);
+  const [completionDismissed, setCompletionDismissed] = useState(false);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => runtime.config.tui.sidebar);
+
+  const [theme, setThemeState] = useState(() => {
+    const resolved = resolveTheme(runtime.config.tui.theme);
+    setActiveTheme(resolved);
+    return resolved;
+  });
+  const changeTheme = useCallback((name: string) => {
+    const resolved = resolveTheme(name);
+    setActiveTheme(resolved);
+    setThemeState(resolved);
+  }, []);
 
   const tools = useMemo(() => createDefaultTools(cwd), [cwd]);
   // Resolved once at startup from SYSTEM_PROMPT.md, so switching models or
@@ -184,6 +179,16 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef<number | null>(null);
   const historyDraftRef = useRef<EditorState | null>(null);
+  const queueRef = useRef<string[]>([]);
+  const runStartedAtRef = useRef<number | null>(null);
+  const disposedRef = useRef(false);
+
+  useEffect(
+    () => () => {
+      disposedRef.current = true;
+    },
+    [],
+  );
 
   const requestPermission = useCallback(
     (request: PermissionRequest): Promise<boolean> => {
@@ -207,24 +212,132 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     resolve?.(allowed);
   }, []);
 
+  /**
+   * The accent spinner is the only thing that needs a timer, and only while a
+   * turn is live. Disabled in non-TTY runs so tests and pipes stay still.
+   */
+  const [tick, setTick] = useState(0);
+  const busy = state.status !== "idle";
+  const animations =
+    runtime.config.tui.animations &&
+    process.env["BUKA_NO_ANIMATION"] === undefined &&
+    Boolean(process.stdout.isTTY);
+  useEffect(() => {
+    if (!busy || !animations) return;
+    const timer = setInterval(() => setTick((value) => (value + 1) % 100_000), 90);
+    return () => clearInterval(timer);
+  }, [busy, animations]);
+
+  // ---------------------------------------------------------------------------
+  // Derived view state
+  // ---------------------------------------------------------------------------
+  const sidebar = sidebarWidth(columns, sidebarMode);
+  const mainWidth = Math.max(8, columns - sidebar);
+  const editorTextWidth = Math.max(1, mainWidth - 4);
+  const editorRowCount = editorRows(editor.value, editorTextWidth).length;
+
+  const completionItems = useMemo(
+    () => (completionDismissed || overlay !== null ? [] : matchingCommands(editor.value)),
+    [completionDismissed, editor.value, overlay],
+  );
+  const visibleCompletions = completionItems.slice(0, MAX_COMPLETIONS);
+  const completionOpen = visibleCompletions.length > 0;
+  const completion: CompletionView | null = completionOpen
+    ? {
+        items: visibleCompletions,
+        index: Math.min(completionIndex, visibleCompletions.length - 1),
+      }
+    : null;
+
+  const layout = useMemo(
+    () =>
+      computeLayout({
+        columns,
+        rows,
+        editorRows: editorRowCount,
+        queuedRows: state.queued.length,
+        completionRows: completion ? completion.items.length + 2 : 0,
+        permission: state.pendingPermission !== null,
+        sidebar: sidebarMode,
+      }),
+    [columns, rows, editorRowCount, state.queued.length, completion, state.pendingPermission, sidebarMode],
+  );
+
   const lines = useMemo(
     () =>
       messagesToLines(state.messages, {
-        width: columns,
+        width: layout.main,
         showThinking: runtime.config.tui.showThinking,
       }),
-    [state.messages, columns, runtime.config.tui.showThinking],
+    [state.messages, layout.main, runtime.config.tui.showThinking, theme.id],
   );
 
-  const inputRows = Math.min(Math.max(1, editorRows(editor.value, columns - 2).length), 6);
-  const inputHeight = state.pendingPermission ? inputRows + 3 : inputRows;
-  const messageHeight = Math.max(3, rows - 3 - inputHeight);
-  const maxScroll = Math.max(0, lines.length - messageHeight);
+  const maxScroll = Math.max(0, lines.length - layout.transcript);
   const offset = state.scroll.pinned
     ? maxScroll
     : Math.min(Math.max(0, state.scroll.offset), maxScroll);
-  const maxScrollRef = useRef(maxScroll);
-  maxScrollRef.current = maxScroll;
+
+  const changedFiles = useMemo(() => extractChangedFiles(state), [state.messages]);
+
+  const contextWindow = useMemo(() => {
+    try {
+      return runtime.registry.resolve(activeModel.reference).config?.context;
+    } catch {
+      return undefined;
+    }
+  }, [runtime.registry, activeModel.reference]);
+
+  const branch = useMemo(() => readGitBranch(cwd), [cwd]);
+
+  // ---------------------------------------------------------------------------
+  // Overlay items
+  // ---------------------------------------------------------------------------
+  const overlayItems = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    if (query.length === 0) return picker.items;
+    return picker.items.filter(
+      (item) =>
+        item.reference.toLowerCase().includes(query) || item.detail.toLowerCase().includes(query),
+    );
+  }, [picker.items, filter]);
+
+  const dialog: DialogSpec | null = overlay
+    ? {
+        title: OVERLAY_TITLES[overlay],
+        ...(pickerLoading || pickerError ? {} : { subtitle: `${overlayItems.length}` }),
+        filter,
+        filterLabel: overlay === "commands" ? "search" : "filter",
+        items: overlayItems,
+        index: Math.min(picker.index, Math.max(0, overlayItems.length - 1)),
+        hint: OVERLAY_HINTS[overlay],
+        empty: pickerError ?? (pickerLoading ? "loading..." : emptyText(overlay)),
+      }
+    : null;
+
+  const hint = state.pendingPermission
+    ? "y allow · n deny · a always allow"
+    : completionOpen
+      ? "↑↓ select · tab complete · enter run · esc close"
+      : busy
+        ? "esc stop · enter queues"
+        : "enter send · alt+enter newline · ctrl+p palette · /help";
+
+  // ---------------------------------------------------------------------------
+  // Queue (Hermes-style: type while the agent is running)
+  // ---------------------------------------------------------------------------
+  const enqueue = useCallback((text: string) => {
+    queueRef.current = [...queueRef.current, text];
+    dispatch({ type: "queue_add", text });
+  }, []);
+
+  const removeQueued = useCallback((index: number) => {
+    queueRef.current = queueRef.current.filter((_, position) => position !== index);
+    dispatch({ type: "queue_remove", index });
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    queueRef.current = [];
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Run
@@ -232,6 +345,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   const runTurn = useCallback(
     async (prompt: string): Promise<void> => {
       busyRef.current = true;
+      runStartedAtRef.current = Date.now();
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -250,6 +364,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       const parts: StoredPart[] = [];
       const toolCalls: ToolCall[] = [];
       const toolResults = new Map<string, ToolResultRecord>();
+      const toolStartedAt = new Map<string, number>();
 
       const appendPart = (kind: "text" | "thinking", delta: string): void => {
         const last = parts[parts.length - 1];
@@ -288,6 +403,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
             case "tool_start":
               toolCalls.push(event.call);
               parts.push({ kind: "tool", id: event.call.id });
+              toolStartedAt.set(event.call.id, Date.now());
               toolResults.set(event.call.id, {
                 id: event.call.id,
                 name: event.call.function.name,
@@ -305,6 +421,10 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
               break;
             case "tool_end": {
               const existing = toolResults.get(event.call.id);
+              const startedAt = toolStartedAt.get(event.call.id);
+              const durationMs = startedAt === undefined ? undefined : Date.now() - startedAt;
+              const diff =
+                typeof event.metadata?.["diff"] === "string" ? event.metadata["diff"] : undefined;
               toolResults.set(event.call.id, {
                 id: event.call.id,
                 name: event.call.function.name,
@@ -312,6 +432,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
                 output: event.output,
                 isError: event.isError,
                 ...(event.summary !== undefined ? { summary: event.summary } : {}),
+                ...(diff !== undefined ? { diff } : {}),
               });
               dispatch({
                 type: "tool_end",
@@ -319,6 +440,8 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
                 output: event.output,
                 isError: event.isError,
                 ...(event.summary !== undefined ? { summary: event.summary } : {}),
+                ...(durationMs !== undefined ? { durationMs } : {}),
+                ...(diff !== undefined ? { diff } : {}),
               });
               dispatch({ type: "status", status: "thinking" });
               break;
@@ -342,6 +465,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
         if (permissionResolveRef.current) answerPermission(false);
         busyRef.current = false;
         abortRef.current = null;
+        runStartedAtRef.current = null;
         dispatch({ type: "done", reason: "complete" });
         active?.completeAssistant({
           parts,
@@ -358,6 +482,16 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
           toolResults: [...toolResults.values()],
           ...(error !== undefined ? { error } : {}),
         });
+
+        // Drain anything typed while this turn was running.
+        const next = queueRef.current[0];
+        if (next !== undefined && !disposedRef.current) {
+          queueRef.current = queueRef.current.slice(1);
+          dispatch({ type: "queue_shift" });
+          setTimeout(() => {
+            if (!disposedRef.current) void runTurn(next);
+          }, 0);
+        }
       }
     },
     [
@@ -401,8 +535,8 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
 
   const openModelPicker = useCallback(async (): Promise<void> => {
     setOverlay("models");
+    setFilter("");
     setPickerError(null);
-    if (picker.items.length > 0) return;
     setPickerLoading(true);
     try {
       const models = await runtime.registry.listModels();
@@ -428,7 +562,29 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     } finally {
       setPickerLoading(false);
     }
-  }, [activeModel.reference, picker.items.length, runtime.registry]);
+  }, [activeModel.reference, runtime.registry]);
+
+  const openCommandPalette = useCallback((): void => {
+    setOverlay("commands");
+    setFilter("");
+    setPickerError(null);
+    setPickerLoading(false);
+    setPicker({ items: commandItems(), index: 0 });
+  }, []);
+
+  const openQueuePicker = useCallback((): void => {
+    setOverlay("queue");
+    setFilter("");
+    setPickerError(null);
+    setPickerLoading(false);
+    setPicker({
+      items: queueRef.current.map((text) => ({
+        reference: text,
+        detail: "remove from queue",
+      })),
+      index: 0,
+    });
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Session management
@@ -446,6 +602,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
 
   const openSessionPicker = useCallback(async (): Promise<void> => {
     setOverlay("sessions");
+    setFilter("");
     setPickerError(null);
     setPickerLoading(true);
     try {
@@ -479,6 +636,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
           modelRef: meta.modelRef,
           model: meta.model,
         });
+        clearQueue();
         try {
           const resolved = runtime.registry.resolve(meta.modelRef);
           setActiveModel({ provider: resolved.provider, modelId: resolved.modelId, reference: meta.modelRef });
@@ -491,14 +649,15 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
         setPickerError((cause as Error).message);
       }
     },
-    [runtime.registry, sessionStore, systemPrompt],
+    [clearQueue, runtime.registry, sessionStore, systemPrompt],
   );
 
   const startNewSession = useCallback((): void => {
     sessionRef.current = undefined;
     messagesRef.current = [{ role: "system", content: systemPrompt }];
+    clearQueue();
     dispatch({ type: "reset" });
-  }, [systemPrompt]);
+  }, [clearQueue, systemPrompt]);
 
   /**
    * Replaces the context with a model-written summary, and records the boundary
@@ -582,35 +741,44 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     dispatch({ type: "compacted", summary: cleaned });
   }, [activeModel.modelId, activeModel.provider, cwd, ensureSession, systemPrompt]);
 
+  const commandContext: CommandContext = {
+    dispatch,
+    exit,
+    openModelPicker,
+    openSessionPicker,
+    startNewSession,
+    compactContext,
+    switchModel,
+    ensureSession,
+    sessionRef,
+    state,
+    tools,
+    runtime,
+    themeName: theme.id,
+    setTheme: changeTheme,
+    themeNames,
+  };
+
   // ---------------------------------------------------------------------------
   // Submit + slash commands
   // ---------------------------------------------------------------------------
   const submit = useCallback(
     (raw: string): void => {
       const text = raw.trim();
-      if (text.length === 0 || busyRef.current) return;
+      if (text.length === 0) return;
 
       historyRef.current = [...historyRef.current.filter((entry) => entry !== text), text];
       historyIndexRef.current = null;
       historyDraftRef.current = null;
       setEditor(createEditor());
+      setCompletionDismissed(false);
+      setCompletionIndex(0);
 
-      if (text.startsWith("/")) {
-        const handled = handleSlashCommand(text, {
-          dispatch,
-          exit,
-          openModelPicker,
-          openSessionPicker,
-          startNewSession,
-          compactContext,
-          switchModel,
-          ensureSession,
-          sessionRef,
-          state,
-          tools,
-          runtime,
-        });
-        if (handled) return;
+      if (runCommand(text, commandContext)) return;
+
+      if (busyRef.current) {
+        if (runtime.config.tui.busyInput === "queue") enqueue(text);
+        return;
       }
 
       // Interactive runs are always persisted, so make sure a session exists
@@ -618,19 +786,34 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       ensureSession();
       void runTurn(text);
     },
-    [
-      compactContext,
-      ensureSession,
-      exit,
-      openModelPicker,
-      openSessionPicker,
-      runTurn,
-      runtime,
-      startNewSession,
-      state,
-      switchModel,
-      tools,
-    ],
+    [commandContext, enqueue, ensureSession, runTurn, runtime.config.tui.busyInput],
+  );
+
+  const choose = useCallback(
+    (item: PickerItem): void => {
+      if (overlay === "models") {
+        switchModel(item.reference);
+        setOverlay(null);
+        return;
+      }
+      if (overlay === "sessions") {
+        resumeSession(item.reference);
+        setOverlay(null);
+        return;
+      }
+      if (overlay === "commands") {
+        setOverlay(null);
+        runCommand(item.reference, commandContext);
+        return;
+      }
+      if (overlay === "queue") {
+        const index = picker.items.indexOf(item);
+        if (index >= 0) removeQueued(index);
+        setOverlay(null);
+        return;
+      }
+    },
+    [commandContext, overlay, picker.items, removeQueued, resumeSession, switchModel],
   );
 
   // ---------------------------------------------------------------------------
@@ -651,34 +834,44 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       return;
     }
 
-    // 2. Overlays.
+    // 2. Overlays own the keyboard.
     if (overlay !== null) {
-      const close = key.escape || (overlay === "models" && key.ctrl && input === "k") || (overlay === "sessions" && key.ctrl && input === "p");
-      if (close) {
-        setOverlay(null);
+      if (key.ctrl && input === "c") {
+        exit();
         return;
       }
-      if (key.upArrow || input === "k") {
+      if (key.escape) {
+        setOverlay(null);
+        setFilter("");
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setFilter((current) => current.slice(0, -1));
+        return;
+      }
+      if (key.upArrow) {
         setPicker((current) => ({ ...current, index: Math.max(0, current.index - 1) }));
         return;
       }
-      if (key.downArrow || input === "j") {
+      if (key.downArrow) {
         setPicker((current) => ({
           ...current,
-          index: Math.min(Math.max(0, current.items.length - 1), current.index + 1),
+          index: Math.min(Math.max(0, overlayItems.length - 1), current.index + 1),
         }));
         return;
       }
       if (key.return) {
-        const chosen = picker.items[picker.index];
-        if (chosen) {
-          if (overlay === "models") switchModel(chosen.reference);
-          else resumeSession(chosen.reference);
-        }
-        setOverlay(null);
+        const chosen = overlayItems[Math.min(picker.index, Math.max(0, overlayItems.length - 1))];
+        if (chosen) choose(chosen);
         return;
       }
-      if (key.ctrl && input === "c") exit();
+      if (input.length > 0 && !key.ctrl && !key.meta) {
+        const printable = input.replace(/[\u0000-\u001f\u007f]/g, "");
+        if (printable.length > 0) {
+          setFilter((current) => current + printable);
+          setPicker((current) => ({ ...current, index: 0 }));
+        }
+      }
       return;
     }
 
@@ -686,6 +879,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     if (key.ctrl && input === "c") {
       if (busyRef.current) stop();
       else if (editor.value.length > 0) setEditor(createEditor());
+      else if (queueRef.current.length > 0) clearQueue();
       else exit();
       return;
     }
@@ -696,7 +890,18 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     }
 
     if (key.ctrl && input === "p") {
-      void openSessionPicker();
+      openCommandPalette();
+      return;
+    }
+
+    if (key.ctrl && input === "x") {
+      if (queueRef.current.length > 0) openQueuePicker();
+      else void openSessionPicker();
+      return;
+    }
+
+    if (key.ctrl && input === "b") {
+      setSidebarMode((current) => (current === false ? "auto" : false));
       return;
     }
 
@@ -723,17 +928,21 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     }
 
     if (key.escape) {
+      if (completionOpen) {
+        setCompletionDismissed(true);
+        return;
+      }
       if (busyRef.current) stop();
       return;
     }
 
     // 4. Scrolling.
     if (key.pageUp || (key.shift && key.upArrow)) {
-      dispatch({ type: "scroll", delta: -(messageHeight - 2), maxScroll: maxScrollRef.current });
+      dispatch({ type: "scroll", delta: -(layout.transcript - 2), maxScroll });
       return;
     }
     if (key.pageDown || (key.shift && key.downArrow)) {
-      dispatch({ type: "scroll", delta: messageHeight - 2, maxScroll: maxScrollRef.current });
+      dispatch({ type: "scroll", delta: layout.transcript - 2, maxScroll });
       return;
     }
     if (key.ctrl && input === "g") {
@@ -741,7 +950,34 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       return;
     }
 
-    // 5. Input editing.
+    // 5. Slash-command completion.
+    if (completion !== null) {
+      if (key.tab) {
+        const chosen = completion.items[completion.index];
+        if (chosen) {
+          setEditor(createEditor(`${chosen.reference} `));
+          setCompletionIndex(0);
+        }
+        return;
+      }
+      if (key.upArrow) {
+        setCompletionIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setCompletionIndex((current) => Math.min(completion.items.length - 1, current + 1));
+        return;
+      }
+      if (key.return) {
+        const chosen = completion.items[completion.index];
+        if (chosen) {
+          submit(chosen.reference);
+          return;
+        }
+      }
+    }
+
+    // 6. Input editing.
     if (key.return || input === "\n") {
       const wantsNewline = input === "\n" || key.meta || key.shift;
       if (wantsNewline) setEditor((current) => insertText(current, "\n"));
@@ -766,6 +1002,8 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
 
     if (key.backspace || key.delete) {
       setEditor((current) => (key.ctrl || key.meta ? deleteWordBefore(current) : backspace(current)));
+      setCompletionIndex(0);
+      setCompletionDismissed(false);
       return;
     }
 
@@ -787,7 +1025,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     }
 
     if (key.upArrow) {
-      const movedUp = moveVertical(editor, columns - 2, -1);
+      const movedUp = moveVertical(editor, editorTextWidth, -1);
       if (movedUp.cursor !== editor.cursor) {
         setEditor(movedUp);
         return;
@@ -817,7 +1055,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
         }
         return;
       }
-      setEditor((current) => moveVertical(current, columns - 2, 1));
+      setEditor((current) => moveVertical(current, editorTextWidth, 1));
       return;
     }
 
@@ -846,205 +1084,51 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
 
     if (input.length > 0 && !key.ctrl && !key.meta) {
       const printable = input.replace(/[\u0000-\u001f\u007f]/g, "");
-      if (printable.length > 0) setEditor((current) => insertText(current, printable));
+      if (printable.length > 0) {
+        setEditor((current) => insertText(current, printable));
+        setCompletionIndex(0);
+        setCompletionDismissed(false);
+      }
     }
   });
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-  const hint = busyRef.current
-    ? "esc stop · ctrl+c stop"
-    : "Enter send · Alt+Enter newline · Ctrl+P sessions · /help";
-
-  const sessionLabel = sessionRef.current
-    ? `${sessionRef.current.title}`
-    : "new session";
-
   return (
-    <Box flexDirection="column" width={columns} height={rows}>
-      <Header state={state} width={columns} session={sessionLabel} />
-
-      <Box flexDirection="column" height={messageHeight} overflow="hidden">
-        {overlay !== null ? (
-          picker.items.length > 0 ? (
-            <ModelPicker
-              items={picker.items}
-              index={picker.index}
-              width={columns}
-              title={overlay === "models" ? "select model" : "resume session"}
-            />
-          ) : (
-            <Text color={palette.dim}>
-              {`  ${
-                pickerError ??
-                (pickerLoading
-                  ? "loading…"
-                  : overlay === "models"
-                    ? "no models available"
-                    : "no saved sessions yet")
-              }`}
-            </Text>
-          )
-        ) : lines.length === 0 ? (
-          <Banner state={state} width={columns} />
-        ) : (
-          <LineList lines={lines} offset={offset} height={messageHeight} />
-        )}
-      </Box>
-
-      <Text color={palette.border}>{"─".repeat(Math.max(1, columns))}</Text>
-
-      {state.pendingPermission ? (
-        <PermissionPrompt state={state} width={columns} />
-      ) : (
-        <PromptInput
-          editor={editor}
-          width={columns}
-          placeholder={
-            busyRef.current ? "streaming… (Esc to stop)" : "ask buka to do something, or /help"
-          }
-          disabled={busyRef.current}
-        />
-      )}
-
-      <StatusBar state={state} width={columns} hint={hint} />
-    </Box>
+    <TuiView
+      state={state}
+      layout={layout}
+      lines={lines}
+      offset={offset}
+      editor={editor}
+      sessionTitle={sessionRef.current?.title}
+      cwd={cwd}
+      branch={branch}
+      version={runtimeVersion()}
+      toolCount={tools.names().length}
+      contextWindow={contextWindow}
+      changedFiles={changedFiles}
+      dialog={dialog}
+      completing={completion}
+      hint={hint}
+      spinnerTick={tick}
+      runStartedAt={runStartedAtRef.current}
+      now={Date.now()}
+      showTokens={runtime.config.tui.showTokenUsage}
+    />
   );
 }
 
 // -----------------------------------------------------------------------------
-// Slash commands
+// Helpers
 // -----------------------------------------------------------------------------
 
-interface SlashContext {
-  dispatch: Dispatch<Action>;
-  exit: () => void;
-  openModelPicker: () => Promise<void>;
-  openSessionPicker: () => Promise<void>;
-  startNewSession: () => void;
-  compactContext: () => Promise<void>;
-  switchModel: (reference: string) => void;
-  ensureSession: () => Session;
-  sessionRef: RefObject<Session | undefined>;
-  state: AppState;
-  tools: ToolRegistry;
-  runtime: Runtime;
-}
-
-/** Returns true when the input was consumed as a command. */
-function handleSlashCommand(raw: string, context: SlashContext): boolean {
-  const [command, ...rest] = raw.slice(1).split(/\s+/);
-  const args = rest.join(" ").trim();
-
-  const reply = (text: string): void => {
-    context.dispatch({ type: "user", text: raw });
-    context.dispatch({ type: "assistant_start" });
-    context.dispatch({ type: "delta", text });
-    context.dispatch({ type: "done", reason: "complete" });
-  };
-
-  switch (command) {
-    case "help":
-      reply(HELP_TEXT);
-      return true;
-
-    case "exit":
-    case "quit":
-      context.exit();
-      return true;
-
-    case "clear":
-      // Visibility only: the session file keeps the full transcript.
-      context.dispatch({ type: "reset" });
-      return true;
-
-    case "new":
-      context.startNewSession();
-      return true;
-
-    case "compact":
-      void context.compactContext();
-      return true;
-
-    case "rename": {
-      const session = context.ensureSession();
-      if (args.length === 0) {
-        reply(`current session: ${session.title}\nid: ${session.id}`);
-        return true;
-      }
-      session.rename(args);
-      reply(`renamed session to "${args}"`);
-      return true;
-    }
-
-    case "sessions":
-      void context.openSessionPicker();
-      return true;
-
-    case "tools": {
-      const names = context.tools.names();
-      reply(
-        names.length === 0
-          ? "no tools registered"
-          : `tools (${names.length}):\n${names.map((name) => `  ${name}`).join("\n")}`,
-      );
-      return true;
-    }
-
-    case "models": {
-      context.dispatch({ type: "user", text: raw });
-      context.dispatch({ type: "assistant_start" });
-      context.runtime.registry
-        .listModels()
-        .then((models) => {
-          const text = models
-            .map(
-              (model) =>
-                `${model.reference}${model.info.tools ? "  (tools)" : ""}${model.info.reasoning ? " (reasoning)" : ""}`,
-            )
-            .join("\n");
-          context.dispatch({ type: "delta", text: `models (${models.length}):\n${text}` });
-          context.dispatch({ type: "done", reason: "complete" });
-        })
-        .catch((cause: unknown) => {
-          context.dispatch({ type: "error", message: (cause as Error).message });
-          context.dispatch({ type: "done", reason: "complete" });
-        });
-      return true;
-    }
-
-    case "model": {
-      if (args.length === 0) {
-        void context.openModelPicker();
-        return true;
-      }
-      context.switchModel(args);
-      return true;
-    }
-
-    case "export": {
-      const target = args.length > 0 ? args : `buka-${Date.now()}.md`;
-      const session = context.sessionRef.current;
-      const header = session
-        ? `# ${session.title}\n\n- session: \`${session.id}\`\n- updated: ${session.metaSnapshot.updatedAt}\n\n`
-        : "";
-      const body = context.state.messages
-        .map((message) => `## ${message.role}\n\n${messageText(message)}\n`)
-        .join("\n");
-      try {
-        writeFileSync(target, header + body, "utf8");
-        reply(`exported ${context.state.messages.length} messages to ${target}`);
-      } catch (cause) {
-        reply(`export failed: ${(cause as Error).message}`);
-      }
-      return true;
-    }
-
-    default:
-      reply(`unknown command "/${command}". Try /help.`);
-      return true;
-  }
+function emptyText(overlay: Overlay): string {
+  if (overlay === "models") return "no models available";
+  if (overlay === "sessions") return "no saved sessions yet";
+  if (overlay === "queue") return "nothing queued";
+  return "no commands";
 }
 
 function relativeTime(iso: string): string {
@@ -1057,4 +1141,17 @@ function relativeTime(iso: string): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+}
+
+let cachedVersion: string | undefined;
+function runtimeVersion(): string {
+  if (cachedVersion !== undefined) return cachedVersion;
+  try {
+    const here = fileURLToPath(import.meta.url);
+    const pkg = JSON.parse(readFileSync(`${here}/../../package.json`, "utf8")) as { version?: string };
+    cachedVersion = pkg.version ?? "0.0.0";
+  } catch {
+    cachedVersion = "0.0.0";
+  }
+  return cachedVersion;
 }
