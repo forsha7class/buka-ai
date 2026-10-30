@@ -6,48 +6,37 @@
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-214%20passing-3fb950)](#testing)
-[![TUI checks](https://img.shields.io/badge/TUI%20checks-31%20passing-3fb950)](#testing)
+[![Tests](https://img.shields.io/badge/tests-233%20passing-3fb950)](#testing)
+[![TUI checks](https://img.shields.io/badge/TUI%20checks-35%20passing-3fb950)](#testing)
 [![Provider SDK](https://img.shields.io/badge/provider%20SDK-none-8b5cf6)](#design-notes)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 
 </div>
 
 ```
- buka ai  9router/Davo · deepseek-v4.1-flash  22.3k tok (17.7k cached)                      ● ready
-▸ you
-  Test-nya gagal. Cari penyebabnya, perbaiki, tunjukin diff-nya, terus jalanin test lagi. Ringkas
-  aja.
-
-◂ buka  deepseek-v4.1-flash
-  ✻ thinking  139 chars  (ctrl+t to show)
-  ⚙ bash  ls -la && git status --short && git log --oneline -5 ✓  exit code 0  (ctrl+o)
-  ⚙ glob  **/* ✓  10 files  (ctrl+o)
-  ⚙ read  package.json ✓  5 of 5 lines  (ctrl+o)
-  ⚙ read  src/lib/store.js ✓  8 of 8 lines  (ctrl+o)
-  ⚙ read  src/routes/users.js ✓  8 of 8 lines  (ctrl+o)
-  ⚙ read  src/server.js ✓  9 of 9 lines  (ctrl+o)
-  ⚙ read  test/users.test.js ✓  11 of 11 lines  (ctrl+o)
-  ⚙ read  README.md ✓  3 of 3 lines  (ctrl+o)
-  ⚙ bash  npm test 2>&1 | tail -40 ✓  exit code 0  (ctrl+o)
-  ✻ thinking  705 chars  (ctrl+t to show)
-  ⚙ bash  grep -rn "findUser" src test ✓  exit code 0  (ctrl+o)
-  ✻ thinking  2390 chars  (ctrl+t to show)
-  Penyebabnya: findUser mengembalikan undefined untuk id yang tidak ada, sedangkan test
-  menuntut error /not found/. Route /users/:id juga ikut salah — untuk user hilang ia balas
-  200 dengan body kosong (JSON.stringify(undefined)).
-  ⚙ edit  src/lib/store.js ✓  1 replacement  (ctrl+o)
-  ⚙ edit  src/routes/users.js ✓  1 replacement  (ctrl+o)
-  ⚙ bash  git diff && echo "=== TEST ===" && npm test 2>&1 | tail -15 ✓  exit code 0  (ctrl+o)
-
-
-  Beres. 2/2 test lulus.
-
-  Penyebab: findUser balikin undefined untuk id tak dikenal, bukan melempar error — jadi
-  assert.throws gagal.
-────────────────────────────────────────────────────────────────────────────────────────────────────
-> ask buka to do something, or /help
-Enter send · Alt+Enter newline · Ctrl+P sessions · /help                                     turn 7
+ buka ai · 0.3.0            │ Fix flaky users test · ~/buka-ai/main        ● ready  22.3k tok
+ 9router/davo               │
+ deepseek-v4.1-flash        │▸ you
+                            │  Test-nya gagal. Cari penyebabnya, perbaiki, tunjukin diff-nya,
+ context                    │  terus jalanin test lagi. Ringkas aja.
+ ████████████░░░░  62%      │
+ 79k / 128k                 │◂ buka  deepseek-v4.1-flash
+                            │  ✻ thinking  139 chars  (ctrl+t to show)
+ changed (2)                │  ⚙ bash  npm test 2>&1 | tail -40       exit code 1  1.2s ✓
+ M src/lib/store.js         │  │ not ok 1 - throws on missing user
+ M src/routes/users.js      │  │ 1..2
+                            │  ⚙ edit  src/lib/store.js             +3 −1  1 replacement 8ms ✓
+                            │  │ @@ -1,5 +1,6 @@
+                            │  │ -  return users.find((u) => u.id === id);
+                            │  │ +  const user = users.find((u) => u.id === id);
+                            │  │ +  if (!user) throw new Error(`user ${id} not found`);
+                            │
+ ctrl+p palette             │  Beres. 2/2 test lulus.
+ ctrl+x sessions            │
+ ctrl+k model               │╭──────────────────────────────────────────────────────────╮
+ ctrl+b sidebar             ││❯ ask buka to do something, or /help                      │
+ /help                      │╰──────────────────────────────────────────────────────────╯
+                            │ ● ready            enter send · alt+enter newline · ctrl+p palette
 ```
 
 <sub>↑ a real session, not a mockup. The model ran the tests, read the code, fixed two files and re-ran the suite to prove it.</sub>
@@ -79,6 +68,35 @@ Alternate screen, its own scrollback, a block cursor, collapsible thinking and
 expandable tool output. The transcript is rendered as a list of pre-wrapped
 lines that the viewport slices, so scrolling is exact and the layout never
 drifts — `test/layout.test.ts` asserts that no row can ever wrap or overflow.
+
+**A split pane, not a wall of text**
+
+On terminals 100 columns or wider, a sidebar shows the session, the model and
+its wire name, a context-usage bar, the files the agent has changed, and the
+keys that do something right now. Narrow terminals drop it and keep the same
+single-column transcript. A top bar carries the working directory and git
+branch; the composer is a real box, and the status line sits underneath it.
+
+**Hermes-style flow**
+
+Typing `/` opens a floating command palette with descriptions; `Tab` completes,
+`Enter` runs. `Ctrl+P` opens the full command palette. Typing while the agent is
+working queues the message instead of dropping it, and the queue drains after
+the current turn. A spinner and elapsed time show what is running, and a welcome
+card replaces the empty transcript.
+
+**Themes that are actually applied**
+
+`tui.theme` was a config key with no effect before; now it selects a real
+palette: `buka` (charcoal and amber, the default), `opencode`, `hermes`, `light`
+and `classic` (the old lavender). `auto` follows the terminal background via
+`COLORFGBG`, and `/theme` switches at runtime.
+
+**Diffs for edits, not just "done"**
+
+`edit` and `write` return a unified diff in tool metadata. The transcript shows
+the changed lines with `+added` / `−removed` counts, and a resumed session still
+shows the same preview because the diff is stored with the tool result.
 
 **A message is an ordered list of parts**
 
@@ -195,8 +213,10 @@ buka init         # writes ~/.config/buka-ai/buka.jsonc
 | `Alt+Enter` / `Ctrl+J` | new line |
 | `Esc` | stop the running turn |
 | `PgUp` / `PgDn` | scroll the transcript |
+| `Ctrl+P` | command palette |
+| `Ctrl+X` | session switcher, or the queue when messages are waiting |
 | `Ctrl+K` | model picker |
-| `Ctrl+P` | session picker |
+| `Ctrl+B` | toggle the sidebar |
 | `Ctrl+T` | expand / collapse thinking |
 | `Ctrl+O` | expand / collapse tool output |
 | `↑` / `↓` | prompt history (when the cursor is on the first/last row) |
@@ -211,7 +231,11 @@ buka init         # writes ~/.config/buka-ai/buka.jsonc
 ### Slash commands
 
 `/help` `/model [ref]` `/models` `/sessions` `/new` `/rename <title>`
-`/compact` `/clear` `/tools` `/export [file]` `/exit`
+`/compact` `/clear` `/tools` `/theme [name]` `/export [file]` `/exit`
+
+Commands live in one registry (`src/tui/commands.ts`) that also feeds the slash
+autocomplete and the `Ctrl+P` palette, so help text cannot drift from what is
+actually runnable.
 
 `/compact` asks the model to summarise the conversation and records the boundary
 in the session log, so resuming continues from the summary instead of reloading
@@ -254,7 +278,17 @@ Global: `~/.config/buka-ai/buka.jsonc` · Project: `./buka.jsonc` (merged over g
     "bash": "ask",   "write": "ask",  "edit": "ask"
   },
 
-  "tui": { "theme": "dark", "showThinking": true, "showTokenUsage": true }
+  "tui": {
+    // auto | dark | light | buka | opencode | hermes | classic
+    "theme": "auto",
+    // auto hides the sidebar below 100 columns
+    "sidebar": "auto",
+    "animations": true,
+    // queue: Enter while the agent is running adds a message for the next turn
+    "busyInput": "queue",
+    "showThinking": true,
+    "showTokenUsage": true
+  }
 }
 ```
 
@@ -326,15 +360,21 @@ src/
 ├─ session/store.ts         append-only JSONL log, context rebuild
 ├─ run/print.ts             non-interactive runner
 ├─ tui/
-│  ├─ app.tsx               root component, keybindings, agent pump
-│  ├─ blocks.ts             message → styled display lines
+│  ├─ app.tsx               root component, keybindings, agent pump, queue
+│  ├─ commands.ts           slash-command registry (help + autocomplete + palette)
+│  ├─ chrome.tsx            sidebar, top bar, composer, status line, banner
+│  ├─ dialogs.tsx           centered dialog and completion-panel line builders
+│  ├─ layout.ts             pure pane geometry, sidebar breakpoints
+│  ├─ theme.ts              palettes, auto light/dark, live `palette` view
+│  ├─ blocks.ts             message → styled display lines (incl. diffs)
 │  ├─ highlight.ts          stateful syntax scanner (no dependency)
 │  ├─ text.ts               cell-accurate measurement and wrapping
 │  ├─ editor.ts             pure text-editing operations
 │  ├─ session-view.ts       stored records → display parts
+│  ├─ changes.ts            files touched by edit/write, for the sidebar
 │  ├─ types.ts              state + reducer + ordered message parts
-│  └─ components.tsx        header, input, status bar, pickers
-└─ util/                    SSE parser, JSONC, args, theme, http
+│  └─ components.tsx        line primitives (`Segments`, `LineList`, `row`)
+└─ util/                    SSE parser, JSONC, args, theme, git, http
 ```
 
 A request flows through five layers with one job each:
@@ -441,13 +481,41 @@ and colours diff hunks by line. It refuses to guess — an unknown language rend
 plain rather than mangled. The one invariant that really matters is asserted
 directly: highlighting never adds, drops or reorders a single character.
 
+**The shell is geometry, not vibes.**
+Ink has no overlay, no z-index and no mouse. So the layout is arithmetic: a pure
+`computeLayout` decides the sidebar width, the transcript height, the composer
+rows and the dialog box, and the panes must add up to the terminal height
+exactly. `test/layout.test.ts` renders the real screen at seven widths and
+asserts every row fits. A dialog is not painted on top of the transcript — it
+*is* the transcript for as long as it is open, which is the only thing Ink can
+actually do reliably.
+
+**The theme is a live view, not a copy.**
+Components read `palette` during render, and `palette` is a set of getters over
+the active theme. Nothing captures a colour at import time — a module-level
+`TOKEN_STYLE` object was the first thing that broke when `/theme` was added, so
+it became a function. Switching a theme re-renders and every pane follows.
+
+**Queueing beats refusing.**
+The old behaviour silently dropped `Enter` while a turn was running. Now the
+message is queued and painted above the composer, and the turn runner drains it
+when it finishes. The queue is mirrored in React state for rendering and in a
+ref for the runner, because the runner must not read state through a stale
+closure.
+
+**A diff belongs to the tool, not the renderer.**
+`edit` and `write` know exactly what they changed, so they attach a unified diff
+to `metadata` alongside the human summary. The TUI renders it, the session log
+keeps it, and a resumed transcript shows the same preview. Reconstructing a diff
+from `before`/`after` snapshots at render time would have been guesswork.
+
 ---
 
 ## Testing
 
 ```bash
-npm test              # 214 unit + integration tests, no network required
-npm run test:smoke    # 31 end-to-end TUI checks (needs a live provider)
+npm test              # 233 unit + integration tests, no network required
+npm run test:smoke    # 35 end-to-end TUI checks (needs a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
 
@@ -459,17 +527,19 @@ CI runs the typecheck, the whole suite and a build on both Node 22 and 24, then
 boots the compiled CLI. See the **Actions** tab for the latest run — workflow
 badges do not render on private repositories.
 
-**214 tests** cover the pure and near-pure layers: text measurement and wrapping,
-the input editor, the reducer, markdown rendering, the syntax highlighter,
-prompt resolution and comment stripping, argument parsing, JSONC, config
-merging, secret resolution, all seven tools against a real temp filesystem, the
-session store, provider protocol decoding, and **layout invariants** (asserting
-no rendered row can ever exceed the terminal width).
+**233 tests** cover the pure and near-pure layers: text measurement and wrapping,
+the input editor, the reducer (including the queue), theme resolution, unified
+diffs, markdown rendering, the syntax highlighter, prompt resolution and comment
+stripping, argument parsing, JSONC, config merging, secret resolution, all seven
+tools against a real temp filesystem, the session store, provider protocol
+decoding, and **layout invariants** — the full screen at forty to a hundred and
+sixty columns, asserting no rendered row can ever exceed the terminal width and
+that the panes fill the height exactly.
 
 Two of those suites exist to stop documentation from drifting away from the code:
-one reads the real key handlers and slash-command dispatcher out of `app.tsx` and
-requires them to be documented in both `/help` and the README, and the layout
-suite renders the real components to prove a row can never overflow.
+one reads the real key handlers out of `app.tsx` and the command registry out of
+`commands.ts`, and requires them to be documented in both `/help` and the README;
+the layout suite renders the real screen to prove a row can never overflow.
 
 **The agent loop is tested directly.** `test/loop.test.ts` drives `runAgent`
 with a scripted fake provider, so multi-turn tool chaining, permission modes,
@@ -481,12 +551,12 @@ in every supported language must round-trip character-for-character, malformed
 input must never throw, block comments and template literals must carry across
 lines, and a `//` inside a string must not become a comment.
 
-**31 end-to-end TUI checks** run the real `<App />` on a fake TTY (a
+**35 end-to-end TUI checks** run the real `<App />` on a fake TTY (a
 `PassThrough` for stdin, a capturing `Writable` for stdout) and assert against
 the component's committed state rather than scraping ANSI output. They cover the
-permission prompt and denial path, session persistence to disk, scrolling,
-both pickers opening *and closing*, `/compact` including its persistence to the
-log, and quitting.
+permission prompt and denial path, session persistence to disk, scrolling, the
+command palette, both pickers opening *and closing*, slash autocomplete,
+`/compact` including its persistence to the log, and quitting.
 
 There are also two debug probes kept around because they earn their place:
 `npx tsx test/debug-keys.ts` (does this keybinding reach the app?) and
@@ -536,6 +606,10 @@ Honest list, not a wishlist:
 
 - **Markdown is deliberately minimal** — fenced code (highlighted), headings,
   bullets, blockquotes, inline code/bold/italic. No tables, links or nested lists.
+- **No mouse capture.** Ink has no mouse API, so the drag-to-select and clickable
+  overlay affordances from other TUIs are not available. Keyboard only.
+- **The sidebar needs width.** `auto` hides it below 100 columns; force it with
+  `tui.sidebar: true` and the composer will still be usable, but code wraps more.
 - **The highlighter covers a fixed language set** — JS/TS, JSON, Python, shell,
   YAML and diff. Other languages render plain rather than being guessed at.
 - **Transient tool output is not highlighted** — only fenced code in the answer

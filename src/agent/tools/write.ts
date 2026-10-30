@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { Tool, ToolResult } from "./types.js";
+import { simpleDiff } from "./diff.js";
 import { asRecord, displayPath, formatBytes, requireString, resolvePath } from "./shared.js";
 
 export const writeTool: Tool = {
@@ -34,6 +35,14 @@ export const writeTool: Tool = {
     const shown = displayPath(ctx.cwd, filePath);
 
     const existed = existsSync(filePath);
+    let before = "";
+    if (existed) {
+      try {
+        before = readFileSync(filePath, "utf8");
+      } catch {
+        before = "";
+      }
+    }
 
     try {
       mkdirSync(dirname(filePath), { recursive: true });
@@ -52,7 +61,7 @@ export const writeTool: Tool = {
     return Promise.resolve({
       output: `${existed ? "Overwrote" : "Created"} ${shown} (${lines} lines, ${formatBytes(bytes)}).`,
       summary: `${existed ? "updated" : "created"} ${lines} lines`,
-      metadata: { path: filePath, created: !existed },
+      metadata: { path: filePath, created: !existed, diff: simpleDiff(before, content, shown) },
     });
   },
 };

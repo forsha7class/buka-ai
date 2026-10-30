@@ -2,104 +2,191 @@
  * Layout invariant tests.
  *
  * The TUI slices a fixed number of display rows to implement scrolling, so the
- * single hardest requirement is: **one Line must render as exactly one row**.
- * These tests render the real components with Ink's `renderToString` and assert
- * that no row ever wraps past the terminal width or spills onto a second line.
+ * single hardest requirement is: **one Line must render as exactly one row**,
+ * and the panes must add up to the terminal height exactly. These tests render
+ * the real components with Ink's `renderToString` and assert both.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "ink";
+import { createElement } from "react";
 
-import { Header, LineList, ModelPicker, PromptInput, StatusBar } from "../src/tui/components.js";
+import { LineList } from "../src/tui/components.js";
+import { Composer, TuiView, type TuiViewProps } from "../src/tui/chrome.js";
+import { completionLines, dialogLines } from "../src/tui/dialogs.js";
+import { computeLayout, sidebarWidth } from "../src/tui/layout.js";
 import { markdownLines, messageToLines } from "../src/tui/blocks.js";
 import { assistant, text, thinking, tool } from "./helpers.js";
-import { editorRows, createEditor, insertText } from "../src/tui/editor.js";
+import { createEditor, editorRows, insertText } from "../src/tui/editor.js";
 import { initialState, type AppState, type Line } from "../src/tui/types.js";
 import { stringWidth } from "../src/tui/text.js";
 
 const ANSI = /\u001b\[[0-9;?]*[a-zA-Z]/g;
-const plain = (text: string): string => text.replace(ANSI, "");
+const plain = (value: string): string => value.replace(ANSI, "");
+
+const WIDTHS = [40, 60, 80, 99, 100, 132, 160];
+const ROWS = 30;
 
 function state(overrides: Partial<AppState> = {}): AppState {
   return { ...initialState({ model: "M", modelRef: "p/m" }), ...overrides };
 }
 
-const WIDTHS = [40, 60, 80, 100, 132];
+function viewProps(overrides: Partial<TuiViewProps> = {}): TuiViewProps {
+  const columns = overrides.layout?.columns ?? 120;
+  const rows = overrides.layout?.rows ?? ROWS;
+  const layout = overrides.layout ?? computeLayout({ columns, rows, editorRows: 1 });
+  const lines: Line[] =
+    overrides.lines ??
+    Array.from({ length: layout.transcript }, (_, index) => [
+      { text: `line ${index} ${"x".repeat(200)}`, style: { color: "#ffffff" } },
+    ]);
+  return {
+    state: state({ model: "deepseek-v4.1-flash", totals: { prompt: 12_400, completion: 800, cached: 100 } }),
+    layout,
+    lines,
+    offset: Math.max(0, lines.length - layout.transcript),
+    editor: createEditor(),
+    sessionTitle: "Fix the flaky users test",
+    cwd: "/root/buka-ai",
+    version: "0.3.0",
+    toolCount: 7,
+    contextWindow: 128_000,
+    changedFiles: ["src/tui/app.tsx", "src/tui/chrome.tsx"],
+    dialog: null,
+    completing: null,
+    hint: "enter send · alt+enter newline · ctrl+p palette · /help",
+    spinnerTick: 0,
+    runStartedAt: null,
+    now: Date.now(),
+    showTokens: true,
+    ...overrides,
+  };
+}
 
-describe("header", () => {
-  for (const width of WIDTHS) {
-    it(`stays on one line at ${width} columns`, () => {
-      const rendered = plain(
-        renderToString(
-          Header({
-            state: state({ model: "deepseek-v4.1-flash" }),
-            width,
-            session: "Use the bash tool to run `echo permission-check`. Then reply with the output.",
-          }),
-          { columns: width },
-        ),
-      );
-      assert.equal(rendered.split("\n").length, 1, "header must not wrap");
-      assert.ok(stringWidth(rendered) <= width, `header too wide: ${stringWidth(rendered)} > ${width}`);
-    });
-  }
-
-  it("never truncates the status indicator", () => {
+describe("layout arithmetic", () => {
+  it("makes the panes add up to exactly the terminal height", () => {
     for (const width of WIDTHS) {
-      const rendered = plain(
-        renderToString(
-          Header({
-            state: state({ model: "deepseek-v4.1-flash", status: "thinking" }),
-            width,
-            session: "a very long session title that should be the first thing to give way",
-          }),
-          { columns: width },
-        ),
-      );
-      assert.ok(
-        rendered.includes("● thinking"),
-        `status truncated at ${width}: ${JSON.stringify(rendered)}`,
-      );
+      for (const rows of [12, 24, 30, 50]) {
+        const layout = computeLayout({ columns: width, rows, editorRows: 1 });
+        assert.equal(
+          layout.topBar + layout.transcript + layout.queue + layout.completion + layout.composer + layout.status,
+          rows,
+          `panes do not fill ${width}x${rows}`,
+        );
+      }
     }
   });
 
-  it("shows the model reference and token totals", () => {
-    const rendered = plain(
-      renderToString(
-        Header({
-          state: state({
-            model: "deepseek-v4.1-flash",
-            totals: { prompt: 4000, completion: 500, cached: 3100 },
-          }),
-          width: 100,
-        }),
-        { columns: 100 },
-      ),
-    );
-    assert.match(rendered, /p\/m/);
-    assert.match(rendered, /deepseek-v4\.1-flash/);
-    assert.match(rendered, /4\.5k tok/);
-    assert.match(rendered, /3\.1k cached/);
+  it("shows the sidebar only on wide terminals by default", () => {
+    assert.equal(sidebarWidth(99, "auto"), 0);
+    assert.equal(sidebarWidth(100, "auto"), 28);
+    assert.equal(sidebarWidth(160, "auto"), 32);
+    assert.equal(sidebarWidth(60, true), 0);
+    assert.equal(sidebarWidth(120, false), 0);
+  });
+
+  it("keeps a sane transcript when the composer grows", () => {
+    const layout = computeLayout({ columns: 120, rows: 24, editorRows: 6 });
+    assert.ok(layout.transcript >= 3, `transcript collapsed: ${layout.transcript}`);
   });
 });
 
-describe("status bar", () => {
-  for (const width of [30, 60, 100]) {
-    it(`stays on one line at ${width} columns`, () => {
+describe("full screen", () => {
+  for (const width of WIDTHS) {
+    it(`renders ${width}x${ROWS} with no row wider than the terminal`, () => {
+      const layout = computeLayout({ columns: width, rows: ROWS, editorRows: 1 });
       const rendered = plain(
-        renderToString(
-          StatusBar({
-            state: state({ turn: 12, lastStop: "max-turns" }),
-            width,
-            hint: "Enter send · Alt+Enter newline · Ctrl+P sessions · /help",
-          }),
-          { columns: width },
-        ),
+        renderToString(createElement(TuiView, viewProps({ layout })), { columns: width }),
       );
-      assert.equal(rendered.split("\n").length, 1);
-      assert.ok(stringWidth(rendered) <= width);
+      const rows = rendered.split("\n");
+      assert.equal(rows.length, ROWS, `expected ${ROWS} rows at ${width}, got ${rows.length}`);
+      for (const row of rows) {
+        assert.ok(stringWidth(row) <= width, `row overflowed at ${width}: ${stringWidth(row)} ${JSON.stringify(row)}`);
+      }
     });
   }
+
+  it("shows the sidebar on wide terminals and hides it on narrow ones", () => {
+    const wide = plain(
+      renderToString(
+        createElement(TuiView, viewProps({ layout: computeLayout({ columns: 120, rows: ROWS, editorRows: 1 }) })),
+        { columns: 120 },
+      ),
+    );
+    assert.match(wide, /terminal coding agent/);
+
+    const narrow = plain(
+      renderToString(
+        createElement(TuiView, viewProps({ layout: computeLayout({ columns: 80, rows: ROWS, editorRows: 1 }) })),
+        { columns: 80 },
+      ),
+    );
+    assert.doesNotMatch(narrow, /terminal coding agent/);
+  });
+
+  it("renders the banner on an empty transcript", () => {
+    const layout = computeLayout({ columns: 100, rows: ROWS, editorRows: 1 });
+    const rendered = plain(
+      renderToString(createElement(TuiView, viewProps({ layout, lines: [] })), { columns: 100 }),
+    );
+    assert.match(rendered, /terminal coding agent/);
+    assert.match(rendered, /p\/m/);
+  });
+
+  it("renders a dialog instead of the transcript when one is open", () => {
+    const layout = computeLayout({ columns: 100, rows: ROWS, editorRows: 1 });
+    const rendered = plain(
+      renderToString(
+        createElement(
+          TuiView,
+          viewProps({
+            layout,
+            dialog: {
+              title: "select model",
+              subtitle: "1",
+              filter: "",
+              items: [{ reference: "9router/davo", detail: "tools reasoning" }],
+              index: 0,
+              hint: "enter select · esc close",
+              empty: "none",
+            },
+          }),
+        ),
+        { columns: 100 },
+      ),
+    );
+    const rows = rendered.split("\n");
+    assert.equal(rows.length, ROWS);
+    assert.match(rendered, /select model/);
+    for (const row of rows) assert.ok(stringWidth(row) <= 100, `dialog row overflowed: ${stringWidth(row)}`);
+  });
+
+  it("keeps the queue strip and permission box inside the width", () => {
+    const layout = computeLayout({
+      columns: 100,
+      rows: ROWS,
+      editorRows: 1,
+      queuedRows: 1,
+      permission: true,
+    });
+    const rendered = plain(
+      renderToString(
+        createElement(
+          TuiView,
+          viewProps({
+            layout,
+            state: state({ queued: ["run the tests too"], pendingPermission: { tool: "bash", preview: "npm test" } }),
+          }),
+        ),
+        { columns: 100 },
+      ),
+    );
+    assert.match(rendered, /queued/);
+    assert.match(rendered, /permission required/);
+    for (const row of rendered.split("\n")) {
+      assert.ok(stringWidth(row) <= 100, `row overflowed: ${stringWidth(row)}`);
+    }
+  });
 });
 
 describe("line list", () => {
@@ -118,76 +205,75 @@ describe("line list", () => {
   });
 });
 
-describe("prompt input", () => {
-  it("renders one row per visual row of the editor", () => {
-    const width = 40;
-    let editor = createEditor();
-    for (let index = 0; index < 5; index++) editor = insertText(editor, `line ${index}\n`);
-
-    const expected = editorRows(editor.value, width - 2).length;
-    const rendered = plain(
-      renderToString(PromptInput({ editor, width, placeholder: "hi", disabled: false }), {
-        columns: width,
-      }),
-    );
-    assert.equal(rendered.split("\n").length, expected);
-  });
-
-  it("fits very long unbroken input inside the width", () => {
-    const width = 40;
+describe("composer", () => {
+  it("fits long unbroken input and grows with the editor", () => {
+    const width = 60;
     const editor = createEditor("y".repeat(500));
-    const rendered = plain(
-      renderToString(PromptInput({ editor, width, placeholder: "hi", disabled: false }), {
-        columns: width,
-      }),
-    );
-    for (const row of rendered.split("\n")) {
-      assert.ok(stringWidth(row) <= width, `row overflowed: ${stringWidth(row)}`);
-    }
+    const rendered = plain(renderToString(Composer({ editor, width, disabled: false }), { columns: width }));
+    const rows = rendered.split("\n");
+    // The composer scrolls internally past six rows.
+    assert.equal(rows.length, Math.min(editorRows(editor.value, width - 4).length, 6) + 2);
+    for (const row of rows) assert.ok(stringWidth(row) <= width, `row overflowed: ${stringWidth(row)}`);
   });
 
   it("shows the placeholder when empty", () => {
     const rendered = plain(
-      renderToString(
-        PromptInput({ editor: createEditor(), width: 60, placeholder: "ask buka", disabled: false }),
-        { columns: 60 },
-      ),
+      renderToString(Composer({ editor: createEditor(), width: 60, disabled: false }), { columns: 60 }),
     );
     assert.match(rendered, /ask buka/);
   });
+
+  it("keeps many visual rows on one row each", () => {
+    const width = 40;
+    let editor = createEditor();
+    for (let index = 0; index < 4; index++) editor = insertText(editor, `line ${index}\n`);
+    const rendered = plain(renderToString(Composer({ editor, width, disabled: false }), { columns: width }));
+    assert.equal(rendered.split("\n").length, editorRows(editor.value, width - 4).length + 2);
+  });
 });
 
-describe("model picker", () => {
-  it("does not wrap rows even with long references and details", () => {
+describe("dialogs", () => {
+  it("renders exactly the requested height with no overflow", () => {
     const items = [
       { reference: "9router/@cf/meta/llama-3.2-1b-instruct", detail: "tools reasoning vision" },
       { reference: "9router/Hr/claude-sonnet-4.6", detail: "tools reasoning" },
     ];
-    for (const width of WIDTHS) {
-      const rendered = plain(renderToString(ModelPicker({ items, index: 1, width }), { columns: width }));
-      // Two border rows, one title row, then one row per item.
-      assert.equal(rendered.split("\n").length, items.length + 3, `unexpected row count at ${width}`);
+    for (const width of [40, 60, 100]) {
+      const lines = dialogLines(
+        {
+          title: "select model",
+          subtitle: `${items.length}`,
+          filter: "",
+          items,
+          index: 1,
+          hint: "enter select · esc close",
+          empty: "none",
+        },
+        width,
+        18,
+      );
+      assert.equal(lines.length, 18, `wrong height at ${width}`);
+      const rendered = plain(renderToString(LineList({ lines, offset: 0, height: 18 }), { columns: width }));
       for (const row of rendered.split("\n")) {
-        assert.ok(stringWidth(row) <= width, `row overflowed at ${width}: ${JSON.stringify(row)}`);
+        assert.ok(stringWidth(row) <= width, `dialog overflowed at ${width}: ${stringWidth(row)}`);
       }
+      assert.match(rendered, /▸/);
     }
   });
 
-  it("marks the selected item", () => {
-    const rendered = plain(
-      renderToString(
-        ModelPicker({
-          items: [
-            { reference: "a", detail: "" },
-            { reference: "b", detail: "" },
-          ],
-          index: 1,
-          width: 60,
-        }),
-        { columns: 60 },
-      ),
+  it("lists completions with one border row each", () => {
+    const lines = completionLines(
+      [
+        { reference: "/model", detail: "switch model" },
+        { reference: "/models", detail: "list every model" },
+      ],
+      0,
+      60,
     );
-    assert.match(rendered, /▸ *b/);
+    assert.equal(lines.length, 4);
+    const rendered = plain(renderToString(LineList({ lines, offset: 0, height: lines.length }), { columns: 60 }));
+    assert.match(rendered, /commands/);
+    assert.match(rendered, /\/model/);
   });
 });
 
@@ -245,5 +331,43 @@ describe("message rendering fits the viewport", () => {
     const lines = markdownLines("para one\n\npara two\n\n```\ncode\n```", 40);
     const rendered = plain(renderToString(LineList({ lines, offset: 0, height: lines.length }), { columns: 40 }));
     assert.equal(rendered.split("\n").length, lines.length);
+  });
+
+  it("renders an edit diff preview without overflowing", () => {
+    const message = assistant([
+      tool({
+        id: "d1",
+        name: "edit",
+        preview: "src/a.ts",
+        status: "done",
+        summary: "1 replacement",
+        diff: [
+          "--- a/src/a.ts",
+          "+++ b/src/a.ts",
+          "@@ -1,3 +1,3 @@",
+          " one",
+          "-two",
+          "+TWO",
+          " three",
+        ].join("\n"),
+      }),
+    ]);
+    for (const width of [40, 80]) {
+      const lines = messageToLines(message, { width, showThinking: true });
+      const rendered = plain(renderToString(LineList({ lines, offset: 0, height: lines.length }), { columns: width }));
+      assert.match(rendered, /\+TWO/);
+      assert.match(rendered, /\+1 −1/);
+      for (const row of rendered.split("\n")) {
+        assert.ok(stringWidth(row) <= width, `diff row overflowed at ${width}: ${stringWidth(row)}`);
+      }
+    }
+  });
+
+  it("gives the user turn a full-width block", () => {
+    const lines = messageToLines(
+      { id: "u1", role: "user", parts: [{ kind: "text", text: "hello there" }], streaming: false, thinkingExpanded: false },
+      { width: 40, showThinking: true },
+    );
+    assert.ok(lines.every((lineItem) => stringWidth(lineItem.map((segment) => segment.text).join("")) <= 40));
   });
 });

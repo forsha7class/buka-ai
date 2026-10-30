@@ -25,6 +25,16 @@ import { assistant, compaction, text, thinking, tool } from "./helpers.js";
 import { getBool, getList, getString, parseArgs } from "../src/util/args.js";
 import { parseJsonc } from "../src/util/jsonc.js";
 import { extractFirstJsonObject } from "../src/util/http.js";
+import { simpleDiff, diffStats } from "../src/agent/tools/diff.js";
+import { extractChangedFiles } from "../src/tui/changes.js";
+import {
+  THEMES,
+  currentTheme,
+  palette,
+  resolveTheme,
+  setActiveTheme,
+  themeById,
+} from "../src/tui/theme.js";
 import { deepMerge, resolveSecret } from "../src/config/load.js";
 import { ToolRegistry } from "../src/agent/tools/registry.js";
 import type { Tool } from "../src/agent/tools/types.js";
@@ -300,6 +310,39 @@ describe("reducer", () => {
     state = reducer(state, { type: "reset" });
     assert.equal(state.messages.length, 0);
     assert.equal(state.modelRef, "p/m");
+  });
+
+  it("queues messages typed while the agent is running", () => {
+    let state = reducer(base(), { type: "queue_add", text: "first" });
+    state = reducer(state, { type: "queue_add", text: "second" });
+    assert.deepEqual(state.queued, ["first", "second"]);
+
+    state = reducer(state, { type: "queue_shift" });
+    assert.deepEqual(state.queued, ["second"]);
+
+    state = reducer(state, { type: "queue_add", text: "third" });
+    state = reducer(state, { type: "queue_remove", index: 0 });
+    assert.deepEqual(state.queued, ["third"]);
+  });
+
+  it("drops the queue when the session is reset", () => {
+    let state = reducer(base(), { type: "queue_add", text: "later" });
+    state = reducer(state, { type: "reset" });
+    assert.deepEqual(state.queued, []);
+  });
+
+  it("keeps a tool's measured duration on the block", () => {
+    let state = reducer(base(), { type: "assistant_start" });
+    state = reducer(state, { type: "tool_start", id: "t1", name: "bash", preview: "npm test" });
+    state = reducer(state, {
+      type: "tool_end",
+      id: "t1",
+      output: "ok",
+      isError: false,
+      summary: "exit code 0",
+      durationMs: 1240,
+    });
+    assert.equal(messageTools(state.messages[0]!)[0]!.durationMs, 1240);
   });
 });
 
@@ -662,3 +705,102 @@ function context(requestPermission?: (request: unknown) => Promise<boolean>) {
     requestPermission: requestPermission ?? (async () => true),
   } as Parameters<ToolRegistry["execute"]>[2];
 }
+
+describe("diff", () => {
+  it("returns nothing when the text is unchanged", () => {
+    assert.equal(simpleDiff("same\n", "same\n", "a.ts"), "");
+  });
+
+  it("shows the changed lines with a unified header", () => {
+    const diff = simpleDiff("one\ntwo\nthree\n", "one\nTWO\nthree\n", "a.ts");
+    assert.match(diff, /^--- a\/a\.ts$/m);
+    assert.match(diff, /^\+\+\+ b\/a\.ts$/m);
+    assert.match(diff, /^@@/m);
+    assert.match(diff, /^-two$/m);
+    assert.match(diff, /^\+TWO$/m);
+    assert.match(diff, /^ three$/m, "keeps context");
+  });
+
+  it("counts additions and removals without counting the file headers", () => {
+    const stats = diffStats(simpleDiff("a\nb\n", "a\nc\nd\n", "a.ts"));
+    assert.deepEqual(stats, { added: 2, removed: 1 });
+  });
+
+  it("treats a brand-new file as additions only", () => {
+    const diff = simpleDiff("", "first\nsecond\n", "new.ts");
+    assert.match(diff, /^\+first$/m);
+    assert.match(diff, /^\+second$/m);
+    assert.deepEqual(diffStats(diff), { added: 2, removed: 0 });
+  });
+
+  it("caps very large diffs", () => {
+    const before = "same\n";
+    const after = `same\n${Array.from({ length: 500 }, (_, index) => `line ${index}`).join("\n")}`;
+    const diff = simpleDiff(before, after, "big.ts");
+    assert.ok(diff.split("\n").length <= 161, "diff should be capped");
+    assert.match(diff, /truncated/);
+  });
+});
+
+describe("themes", () => {
+  it("ships complete palettes", () => {
+    for (const [id, theme] of Object.entries(THEMES)) {
+      assert.equal(theme.id, id);
+      for (const [key, value] of Object.entries(theme.colors)) {
+        assert.match(value, /^#[0-9a-f]{6}$/i, `${id}.${key} should be a hex colour`);
+      }
+    }
+  });
+
+  it("resolves names, aliases and the light-background hint", () => {
+    assert.equal(resolveTheme("opencode").id, "opencode");
+    assert.equal(resolveTheme("dark").id, "buka");
+    assert.equal(resolveTheme("nope").id, "buka");
+    assert.equal(resolveTheme(undefined, { COLORFGBG: "0;15" }).id, "light");
+    assert.equal(resolveTheme(undefined, { COLORFGBG: "15;0" }).id, "buka");
+    assert.equal(resolveTheme(undefined, { BUKA_THEME: "hermes" }).id, "hermes");
+    // An explicit choice beats the environment.
+    assert.equal(resolveTheme("classic", { BUKA_THEME: "hermes" }).id, "classic");
+  });
+
+  it("exposes the active theme through the live palette and restores it", () => {
+    const previous = currentTheme();
+    try {
+      const hermes = themeById("hermes")!;
+      setActiveTheme(hermes);
+      assert.equal(palette.accent, hermes.colors.accent);
+      assert.equal(palette.panel, hermes.colors.panel);
+    } finally {
+      setActiveTheme(previous);
+    }
+    assert.equal(palette.accent, previous.colors.accent);
+  });
+});
+
+describe("changed files", () => {
+  it("deduplicates and keeps the most recent edits", () => {
+    const message = (id: string, preview: string) =>
+      assistant([tool({ id, name: "edit", preview })]);
+    const state = reducer(initialState({ model: "m", modelRef: "p/m" }), {
+      type: "seed",
+      model: "m",
+      modelRef: "p/m",
+      messages: [
+        message("a", "src/a.ts  (all occurrences)"),
+        message("b", "src/b.ts  (12 lines)"),
+        message("c", "src/a.ts  (all occurrences)"),
+        message("d", "src/c.ts"),
+        message("e", "src/d.ts"),
+        message("f", "src/e.ts"),
+        message("g", "src/f.ts"),
+      ],
+    });
+    assert.deepEqual(extractChangedFiles(state), [
+      "src/a.ts",
+      "src/c.ts",
+      "src/d.ts",
+      "src/e.ts",
+      "src/f.ts",
+    ]);
+  });
+});

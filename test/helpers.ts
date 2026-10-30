@@ -25,6 +25,8 @@ export function tool(partial: Partial<ToolView> & { name: string }): MessagePart
       expanded: partial.expanded ?? false,
       ...(partial.output !== undefined ? { output: partial.output } : {}),
       ...(partial.summary !== undefined ? { summary: partial.summary } : {}),
+      ...(partial.durationMs !== undefined ? { durationMs: partial.durationMs } : {}),
+      ...(partial.diff !== undefined ? { diff: partial.diff } : {}),
     },
   };
 }

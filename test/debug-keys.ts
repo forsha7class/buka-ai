@@ -101,7 +101,9 @@ async function main(): Promise<void> {
   await probe(stdout, "escape closes", "\u001b", /./);
   await delay(300);
 
-  await probe(stdout, "ctrl+p (bare)", "\u0010", /resume session|no saved sessions/);
+  await probe(stdout, "ctrl+p (bare)", "\u0010", /enter run · type to filter/);
+  await probe(stdout, "escape closes", "\u001b", /./);
+  await probe(stdout, "ctrl+x (bare)", "\u0018", /resume session|no saved sessions/);
   await probe(stdout, "escape closes", "\u001b", /./);
   await delay(300);
 
