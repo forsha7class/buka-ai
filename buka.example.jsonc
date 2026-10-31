@@ -63,6 +63,7 @@
     "theme": "auto",
     // auto hides the sidebar on terminals narrower than 100 columns
     "sidebar": "auto",
+    // spinner, mascot and activity animations
     "animations": true,
     // queue: Enter while the agent is running adds a message for the next turn
     "busyInput": "queue",

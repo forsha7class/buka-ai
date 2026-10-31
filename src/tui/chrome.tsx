@@ -10,7 +10,7 @@
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 
-import { MASCOT, MASCOT_COMPACT } from "./brand.js";
+import { MASCOT_COMPACT_FRAMES, MASCOT_FRAMES } from "./brand.js";
 import { LineList, row, Segments } from "./components.js";
 import { completionLines, dialogLines, type DialogSpec, type PickerItem } from "./dialogs.js";
 import { editorRows, visualRows, type EditorState } from "./editor.js";
@@ -42,6 +42,8 @@ export interface TuiViewProps {
   completing: CompletionView | null;
   hint: string;
   spinnerTick: number;
+  /** Animation frame for the welcome mascot; omitted in static renders. */
+  brandTick?: number;
   runStartedAt: number | null;
   now: number;
   showTokens: boolean;
@@ -453,13 +455,21 @@ export function bannerLines(props: TuiViewProps, width: number, height: number):
   ];
 
   lines.push([]);
-  const mascot =
-    width < 24 ? undefined : height >= 21 ? MASCOT : height >= 19 ? MASCOT_COMPACT : undefined;
-  if (mascot) {
-    for (const line of mascot) {
-      lines.push([{ text: line, style: { color: palette.accent, ...bg } }]);
+  const brandTick = props.brandTick ?? 0;
+  const mascotFrames =
+    width < 24
+      ? undefined
+      : height >= 21
+        ? MASCOT_FRAMES
+        : height >= 19
+          ? MASCOT_COMPACT_FRAMES
+          : undefined;
+  if (mascotFrames) {
+    const frame = mascotFrames[brandTick % mascotFrames.length]!;
+    const color = brandTick % 8 === 3 || brandTick % 8 === 4 ? palette.accentSoft : palette.accent;
+    for (const line of frame) {
+      lines.push([{ text: line, style: { color, ...bg } }]);
     }
-    lines.push([]);
   }
   lines.push([
     { text: "  buka ai", style: { color: palette.accent, bold: true, ...bg } },

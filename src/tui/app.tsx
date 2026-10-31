@@ -218,11 +218,14 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   }, []);
 
   /**
-   * The accent spinner is the only thing that needs a timer, and only while a
-   * turn is live. Disabled in non-TTY runs so tests and pipes stay still.
+   * Two independent timers: the spinner only while a turn is live, and the
+   * welcome mascot while the empty banner is on screen. Disabled in non-TTY
+   * runs so tests and pipes stay still.
    */
   const [tick, setTick] = useState(0);
+  const [brandTick, setBrandTick] = useState(0);
   const busy = state.status !== "idle";
+  const showBrand = state.messages.length === 0 && overlay === null && !providerSetup;
   const animations =
     runtime.config.tui.animations &&
     process.env["BUKA_NO_ANIMATION"] === undefined &&
@@ -232,6 +235,11 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     const timer = setInterval(() => setTick((value) => (value + 1) % 100_000), 90);
     return () => clearInterval(timer);
   }, [busy, animations]);
+  useEffect(() => {
+    if (!showBrand || !animations) return;
+    const timer = setInterval(() => setBrandTick((value) => (value + 1) % 100_000), 700);
+    return () => clearInterval(timer);
+  }, [showBrand, animations]);
 
   // ---------------------------------------------------------------------------
   // Derived view state
@@ -1220,6 +1228,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       completing={completion}
       hint={hint}
       spinnerTick={tick}
+      brandTick={brandTick}
       runStartedAt={runStartedAtRef.current}
       now={Date.now()}
       showTokens={runtime.config.tui.showTokenUsage}

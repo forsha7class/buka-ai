@@ -6,7 +6,7 @@
 
 **A terminal-native AI coding agent with a full-screen TUI, real tool use, and resumable sessions.**
 
-<sub>Meet <strong>Buka</strong>, the little terminal ghost that keeps your code moving.</sub>
+<sub>Meet <strong>Buka</strong>, the little terminal ghost that blinks, floats, and keeps your code moving.</sub>
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -110,6 +110,8 @@ buka -c                       # resume the latest session in this directory
   session switcher.
 - Configurable themes (`buka`, `opencode`, `hermes`, `light`, `classic`, or
   `auto`), switchable at runtime with `/theme`.
+- An animated Buka mascot on the empty screen: blinking eyes, a blinking cursor,
+  a gentle float, and a soft colour pulse.
 - Messages typed while the agent is working are queued for the next turn instead
   of being dropped.
 
@@ -392,6 +394,7 @@ At either level, `buka.json` and `.bukarc.jsonc` are also recognized. With
     "theme": "auto",
     // auto hides the sidebar below 100 columns
     "sidebar": "auto",
+    // spinner, mascot and activity animations
     "animations": true,
     // queue: Enter while the agent is running adds a message for the next turn
     "busyInput": "queue",
@@ -457,7 +460,7 @@ allows once, `n` denies, and `a` allows that tool for the rest of the session.
 |---|---|---|---|
 | `theme` | `auto`, `dark`, `light`, `buka`, `opencode`, `hermes`, `classic` | `auto` | Colour palette. `auto` follows the terminal background. |
 | `sidebar` | `auto`, `true`, `false` | `auto` | `auto` shows the sidebar only on wide terminals. |
-| `animations` | boolean | `true` | Spinner and activity animations. |
+| `animations` | boolean | `true` | Spinner, mascot and activity animations. |
 | `busyInput` | `queue`, `block` | `queue` | What `Enter` does while the agent is running. |
 | `showThinking` | boolean | `true` | Show collapsible reasoning blocks. |
 | `showTokenUsage` | boolean | `true` | Show token usage in the status line. |

@@ -141,17 +141,45 @@ describe("full screen", () => {
       }
     }
 
+    // The mascot blinks and hides its cursor on different animation frames.
+    const animated = computeLayout({ columns: 100, rows: ROWS, editorRows: 1 });
+    const frame = (brandTick: number): string =>
+      plain(
+        renderToString(
+          createElement(TuiView, viewProps({ layout: animated, lines: [], brandTick })),
+          { columns: 100 },
+        ),
+      );
+    assert.match(frame(2), /─     ─/);
+    assert.doesNotMatch(frame(4), />_/);
+    for (let tick = 0; tick < 8; tick++) {
+      for (const row of frame(tick).split("\n")) {
+        assert.ok(
+          stringWidth(row) <= 100,
+          `animated banner row overflowed at tick ${tick}: ${stringWidth(row)} ${JSON.stringify(row)}`,
+        );
+      }
+    }
+
     // 24-row terminals get the compact mascot instead of a clipped ghost.
     const mid = computeLayout({ columns: 80, rows: 24, editorRows: 1 });
     const midRendered = plain(
       renderToString(createElement(TuiView, viewProps({ layout: mid, lines: [] })), { columns: 80 }),
     );
     assert.match(midRendered, />_/);
-    for (const row of midRendered.split("\n")) {
-      assert.ok(
-        stringWidth(row) <= 80,
-        `compact banner row overflowed: ${stringWidth(row)} ${JSON.stringify(row)}`,
+    for (let tick = 0; tick < 6; tick++) {
+      const compactFrame = plain(
+        renderToString(
+          createElement(TuiView, viewProps({ layout: mid, lines: [], brandTick: tick })),
+          { columns: 80 },
+        ),
       );
+      for (const row of compactFrame.split("\n")) {
+        assert.ok(
+          stringWidth(row) <= 80,
+          `compact banner row overflowed at tick ${tick}: ${stringWidth(row)} ${JSON.stringify(row)}`,
+        );
+      }
     }
 
     // Short terminals get the plain banner, without clipping the mascot.

@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An activity line and welcome banner.** A spinner, the current action and
   elapsed time sit under the composer; the empty transcript shows a card with the
   model, cwd, tool count and key hints.
+- **An animated Buka mascot.** The welcome banner blinks, floats and pulses its
+  accent colour, with a compact variant for 24-row terminals. It respects
+  `tui.animations` and `BUKA_NO_ANIMATION`.
 - **New config:** `tui.sidebar` (`auto` | boolean) and `tui.animations`.
 - **New keybinding:** `Ctrl+B` toggles the sidebar.
 - A drift guard for the keybinding and slash-command documentation. It reads the
