@@ -124,13 +124,48 @@ describe("full screen", () => {
     assert.doesNotMatch(narrow, /terminal coding agent/);
   });
 
-  it("renders the banner on an empty transcript", () => {
-    const layout = computeLayout({ columns: 100, rows: ROWS, editorRows: 1 });
-    const rendered = plain(
-      renderToString(createElement(TuiView, viewProps({ layout, lines: [] })), { columns: 100 }),
+  it("renders the banner and mascot on an empty transcript", () => {
+    for (const width of [40, 80, 100, 132]) {
+      const layout = computeLayout({ columns: width, rows: ROWS, editorRows: 1 });
+      const rendered = plain(
+        renderToString(createElement(TuiView, viewProps({ layout, lines: [] })), { columns: width }),
+      );
+      assert.match(rendered, /terminal coding agent/);
+      assert.match(rendered, /p\/m/);
+      assert.match(rendered, />_/);
+      for (const row of rendered.split("\n")) {
+        assert.ok(
+          stringWidth(row) <= width,
+          `banner row overflowed at ${width}: ${stringWidth(row)} ${JSON.stringify(row)}`,
+        );
+      }
+    }
+
+    // 24-row terminals get the compact mascot instead of a clipped ghost.
+    const mid = computeLayout({ columns: 80, rows: 24, editorRows: 1 });
+    const midRendered = plain(
+      renderToString(createElement(TuiView, viewProps({ layout: mid, lines: [] })), { columns: 80 }),
     );
-    assert.match(rendered, /terminal coding agent/);
-    assert.match(rendered, /p\/m/);
+    assert.match(midRendered, />_/);
+    for (const row of midRendered.split("\n")) {
+      assert.ok(
+        stringWidth(row) <= 80,
+        `compact banner row overflowed: ${stringWidth(row)} ${JSON.stringify(row)}`,
+      );
+    }
+
+    // Short terminals get the plain banner, without clipping the mascot.
+    const short = computeLayout({ columns: 100, rows: 12, editorRows: 1 });
+    const shortRendered = plain(
+      renderToString(createElement(TuiView, viewProps({ layout: short, lines: [] })), { columns: 100 }),
+    );
+    assert.doesNotMatch(shortRendered, />_/);
+    for (const row of shortRendered.split("\n")) {
+      assert.ok(
+        stringWidth(row) <= 100,
+        `short banner row overflowed: ${stringWidth(row)} ${JSON.stringify(row)}`,
+      );
+    }
   });
 
   it("renders a dialog instead of the transcript when one is open", () => {

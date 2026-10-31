@@ -10,6 +10,7 @@
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 
+import { MASCOT, MASCOT_COMPACT } from "./brand.js";
 import { LineList, row, Segments } from "./components.js";
 import { completionLines, dialogLines, type DialogSpec, type PickerItem } from "./dialogs.js";
 import { editorRows, visualRows, type EditorState } from "./editor.js";
@@ -452,6 +453,14 @@ export function bannerLines(props: TuiViewProps, width: number, height: number):
   ];
 
   lines.push([]);
+  const mascot =
+    width < 24 ? undefined : height >= 21 ? MASCOT : height >= 19 ? MASCOT_COMPACT : undefined;
+  if (mascot) {
+    for (const line of mascot) {
+      lines.push([{ text: line, style: { color: palette.accent, ...bg } }]);
+    }
+    lines.push([]);
+  }
   lines.push([
     { text: "  buka ai", style: { color: palette.accent, bold: true, ...bg } },
     { text: ` · ${props.version}`, style: { color: palette.faint, ...bg } },

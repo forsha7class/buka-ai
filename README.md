@@ -1,8 +1,12 @@
 <div align="center">
 
-# buka ai
+<h1 align="center">
+  <img src="./assets/logo.svg" alt="buka ai" width="520">
+</h1>
 
 **A terminal-native AI coding agent with a full-screen TUI, real tool use, and resumable sessions.**
+
+<sub>Meet <strong>Buka</strong>, the little terminal ghost that keeps your code moving.</sub>
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -14,7 +18,7 @@
 
 ```text
  buka ai · 0.3.0            │ Fix flaky users test · ~/buka-ai/main        ● ready  22.3k tok
- 9router/davo               │
+ 9router/default            │
  deepseek-v4.1-flash        │▸ you
                             │  Test-nya gagal. Cari penyebabnya, perbaiki, tunjukin diff-nya,
  context                    │  terus jalanin test lagi. Ringkas aja.
@@ -44,9 +48,10 @@
 
 ## Overview
 
-`buka` is a chat CLI that can actually *do* things in your repository. It reads
-and edits files, runs commands, searches code, and keeps working until the task
-is done. It runs in your terminal, against any OpenAI-compatible endpoint.
+`buka` is a terminal-native coding agent that can actually *do* things in your
+repository. It reads and edits files, runs commands, searches code, and keeps
+working until the task is done. It runs in your terminal against any
+OpenAI-compatible endpoint, or natively against Anthropic and Google Gemini.
 
 There is no provider SDK, no daemon, and no database. One command, one config
 file, and plain files on disk.
@@ -158,8 +163,8 @@ curl -fsSL https://raw.githubusercontent.com/forsha7class/buka-ai/main/install.s
 ```
 
 The installer downloads the latest source to `~/.buka-ai`, builds it, and puts
-`buka` on your `PATH` — `/usr/local/bin` when writable, otherwise
-`~/.local/bin`. Then:
+`buka` on your `PATH` — normally `/usr/local/bin` when writable, otherwise
+`~/.local/bin` or `~/bin`. Then:
 
 ```bash
 buka --version
@@ -252,16 +257,19 @@ Useful first commands inside the TUI:
 | `buka -s <id>` | Resume a specific session. |
 | `buka models` | List every available model. |
 | `buka sessions` | List saved sessions. |
-| `buka setup` | Add or change a provider and API key interactively. |
-| `buka init` | Set up a provider interactively; `--yes` writes a starter config file. |
+| `buka setup` | Add or change a provider and API key interactively (requires a TTY). |
+| `buka init` | Set up a provider interactively; non-interactive shells and `--yes` write a starter config. |
+
+`buka -p` runs are ephemeral by default: they print the answer without writing a
+session. Add `-c` or `-s <id>` to append the run to a session instead.
 
 | Flag | Description |
 |---|---|
-| `-m, --model <ref>` | Override the configured model (`provider/modelKey`). |
+| `-m, --model <ref>` | Override the configured model (`provider/modelKey`, or a bare provider id to auto-select). |
 | `-p, --print <prompt>` | Run non-interactively and print the answer. |
 | `-c, --continue` | Resume the latest session for this directory. |
 | `-s, --session <id>` | Resume a specific session. |
-| `--config <path>` | Use a specific config file. |
+| `--config <path>` | Use only this config file, replacing the normal global/project search. |
 | `--cwd <dir>` | Set the working directory. |
 | `--yolo` | Auto-approve every tool call. |
 | `--no-tools` | Disable tool use for this run. |
@@ -283,7 +291,7 @@ buka -p "explain the request flow in src/"
 buka -c -p "now add tests for that"
 
 # Run unattended with a specific model
-buka --yolo -m 9router/davo -p "refactor utils.ts and run the tests"
+buka --yolo -m 9router/default -p "refactor utils.ts and run the tests"
 
 # Inspect exactly what the model is being told
 buka --show-prompt
@@ -293,7 +301,7 @@ buka --show-prompt
 
 | Key | Action |
 |---|---|
-| `Enter` | Send; queues the message while the agent is running. |
+| `Enter` | Send; queues the message while the agent is running (`busyInput: "queue"`, the default). |
 | `Alt+Enter` / `Ctrl+J` | Insert a new line. |
 | `Esc` | Stop the running turn, or close a panel. |
 | `PgUp` / `PgDn` | Scroll the transcript. |
@@ -310,7 +318,7 @@ buka --show-prompt
 | `Ctrl+D` | Delete the character under the cursor. |
 | `Ctrl+G` | Jump to the newest output. |
 | `Ctrl+L` | Clear the visible transcript. |
-| `Ctrl+C` | Stop the running turn, then clear the input, then quit. |
+| `Ctrl+C` | Stop the running turn; when idle, clear the input, then the queue, then quit. |
 
 ### Slash commands
 
@@ -343,9 +351,12 @@ Configuration is loaded from:
 - **Global:** `~/.config/buka-ai/buka.jsonc` (XDG-aware)
 - **Project:** `./buka.jsonc`, merged over the global file
 
+At either level, `buka.json` and `.bukarc.jsonc` are also recognized. With
+`--config`, only that file is loaded; the global and project search is skipped.
+
 ```jsonc
 {
-  "model": "9router/davo",
+  "model": "9router/default",
 
   "providers": {
     "9router": {
@@ -354,12 +365,14 @@ Configuration is loaded from:
       "baseURL": "http://127.0.0.1:20128/v1",
       // Secrets: {env:VAR} or {file:/path/to/key}
       "apiKey": "{env:BUKA_9ROUTER_KEY}",
+      // Optional extra request headers; auth headers are still set by the adapter
+      "headers": { "X-Title": "buka" },
       // Discover models from the endpoint's /v1/models
       "discover": true,
       "models": {
-        "davo": {
-          "id": "Davo",              // wire id, when it differs from the key
-          "name": "Davo (combo)",
+        "default": {
+          "id": "deepseek-v4.1-flash", // wire id, when it differs from the key
+          "name": "Default route",
           "tools": true,
           "reasoning": true,
           "context": 1000000,
@@ -400,25 +413,28 @@ A provider entry needs a `baseURL`; `type` is one of `openai-compatible`
 (default), `anthropic`, or `google`. The API key may be a literal value,
 `{env:VAR}`, or `{file:/path/to/key}`. Setup stores typed keys in
 `~/.config/buka-ai/secrets/<provider>.key` (mode `0600`) and writes a
-`{file:...}` reference into the config.
+`{file:...}` reference into the config. Optional `headers` are merged into every
+request; authentication headers are applied last by the adapter.
 
-If no config exists and `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
-or `BUKA_9ROUTER_KEY` is set, `buka` uses the matching built-in provider. A
-config that only sets some keys still keeps the built-in provider unless it
-defines `providers` itself.
+If no config exists and `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`
+(or its alias `GOOGLE_API_KEY`), or `BUKA_9ROUTER_KEY` is set, `buka` uses the
+matching built-in provider. When the built-in provider is used, `BUKA_MODEL`
+selects the default model. A config that only sets some keys still keeps the
+built-in provider unless it defines `providers` itself.
 
 Use `/provider` inside the TUI to see configured providers, add a new one, or
 switch to another provider's models without restarting.
 
-Setup merges the new provider into the existing global config and keeps a
-`buka.jsonc.bak` before rewriting it. The rewrite normalizes formatting, so
+Setup merges the new provider into the existing config and keeps a
+`<config>.bak` copy before rewriting it. The rewrite normalizes formatting, so
 comments in a hand-edited file may be dropped; the backup keeps the original.
 
 **Model references split on the first slash only.** Model ids legitimately
 contain slashes (`Hr/claude-sonnet-4.6`, `@cf/meta/llama-3.2-1b-instruct`), so
 `9router/Hr/glm-5.3` means provider `9router`, model `Hr/glm-5.3`. Anything not
 declared in `models` is used as the wire id verbatim, which lets discovery and
-hand-written configs mix cleanly.
+hand-written configs mix cleanly. A bare provider id (no slash) auto-selects a
+suitable model for that provider.
 
 ### Permissions
 
@@ -430,9 +446,10 @@ Each tool can be set to:
 | `ask` | Prompt for approval in the TUI. |
 | `deny` | Refuse; the model is told the tool is unavailable. |
 
-A tool with no explicit entry defaults to `ask`, never to unattended execution.
-During an approval prompt, `y` allows once, `n` denies, and `a` allows that tool
-for the rest of the session.
+The built-in defaults are `allow` for the read-only tools (`read`, `glob`,
+`grep`, `list`) and `ask` for `bash`, `write`, and `edit`; an unknown tool falls
+back to `ask`, never to unattended execution. During an approval prompt, `y`
+allows once, `n` denies, and `a` allows that tool for the rest of the session.
 
 ### TUI
 
@@ -501,10 +518,12 @@ src/
 │  ├─ system-prompt.ts      appends environment + tool list
 │  ├─ permission.ts         ask / allow / deny policy
 │  └─ tools/                read, write, edit, glob, grep, list, bash
+│                           (diff, registry, shared helpers)
 ├─ session/store.ts         append-only JSONL log, context rebuild
 ├─ run/print.ts             non-interactive runner
 ├─ tui/
 │  ├─ app.tsx               root component, keybindings, agent pump, queue
+│  ├─ brand.ts              terminal-ghost mascot for the welcome banner
 │  ├─ commands.ts           slash-command registry
 │  ├─ chrome.tsx            sidebar, top bar, composer, status line, banner
 │  ├─ dialogs.tsx           centered dialog and completion-panel builders
@@ -552,7 +571,7 @@ The client asks for SSE unconditionally and only reads a whole JSON body when th
 server explicitly returns `application/json`, tolerating trailing garbage.
 
 **The returned model name is the source of truth.** Alias and "combo" endpoints
-resolve to a different upstream model: requesting `Davo` can stream chunks
+resolve to a different upstream model: requesting a combo alias can stream chunks
 labelled `deepseek-v4.1-flash`. The header shows both names, and the session
 records the upstream name because that is what actually ran.
 
@@ -629,8 +648,9 @@ key handlers and command registry and requires them to be documented in both
 row can never overflow.
 
 CI runs typechecking, the full suite, and a build on Node 22 and Node 24, then
-boots the compiled CLI. See the **Actions** tab for the latest run (workflow
-badges do not render on private repositories).
+boots the compiled CLI. A separate job exercises the installer and its
+uninstaller. See the **Actions** tab for the latest run (workflow badges do not
+render on private repositories).
 
 The screenshot at the top of this README is generated by `test/capture.tsx`,
 which runs a genuine session and re-renders the real components with the captured
@@ -648,11 +668,15 @@ npm run test:smoke     # end-to-end TUI (requires a live provider)
 npm run build          # compile to dist/
 ```
 
+Release notes live in [CHANGELOG.md](./CHANGELOG.md).
+
 ### Adding a tool
 
 Create a file in `src/agent/tools/`, implement the `Tool` interface, and register
 it in `tools/index.ts`. Name it after its `permission` key so the policy lines up
-without a translation table.
+without a translation table. Add the same key to `PermissionSchema` in
+`src/config/schema.ts` and the `permission` example above so it can be
+configured.
 
 ```ts
 export const myTool: Tool = {
