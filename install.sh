@@ -214,8 +214,9 @@ rm -f "$TARGET"
 } > "$TARGET"
 chmod +x "$TARGET"
 
+ON_PATH=0
 case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
+  *":$BIN_DIR:"*) ON_PATH=1 ;;
   *)
     case "$BIN_DIR" in
       "$HOME"/*)
@@ -252,4 +253,8 @@ say "  command: $TARGET"
 say "  version: $INSTALLED_VERSION"
 say "  source:  $INSTALL_DIR"
 say ""
-say "Start it with: buka"
+if [ "$ON_PATH" -eq 1 ]; then
+  say "Start it with: buka"
+else
+  say "Start it with: $TARGET"
+fi
