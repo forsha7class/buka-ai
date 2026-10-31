@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **First-run provider setup.** A fresh `buka` opens a provider picker with
+  presets for 9Router, OpenAI, OpenRouter, Anthropic, Google Gemini, DeepSeek,
+  Groq, xAI, Mistral, Together AI, Fireworks, Ollama and LM Studio, plus a
+  custom OpenAI-compatible endpoint. `buka setup` opens the same wizard later.
+- **An in-TUI provider manager.** `/provider` lists configured providers, lets
+  you add one with an API key, and switches to its models without restarting.
+- **Native Anthropic and Gemini adapters.** They speak each provider's native
+  streaming protocol, tools, reasoning blocks and usage accounting rather than
+  pretending they are OpenAI-compatible.
+- **Secure key storage.** Keys typed in setup go to
+  `~/.config/buka-ai/secrets/<provider>.key` with mode `0600`; the config stores
+  only a `{file:...}` reference.
 - **One-command install.** `install.sh` installs from a clone or a `curl` pipe,
   builds the project, and puts `buka` on `PATH`; `npm install` now builds
   automatically through a `prepare` script. The README documents the one-line
@@ -46,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `buka init` opens the provider picker in an interactive terminal; `buka init
+  --yes` keeps the old non-interactive starter-file behaviour for scripts.
 - **Keybindings now follow the OpenCode/Hermes convention.** `Ctrl+P` is the
   command palette (it used to open the session picker), `Ctrl+X` opens the
   session picker — or the queue when messages are waiting — and `Ctrl+K` still
@@ -57,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A fresh install no longer exits with `Could not choose a model automatically`
+  when no provider is configured; setup runs before the first TUI.
+- 9Router key detection now also checks `~/.config/opencode/9router-api-key` and
+  `/opt/9router/api-key.txt`, not only the older `9router.key` path.
 - `tui.theme` was silently ignored by the TUI; colour is now resolved from the
   config and re-applied on every render.
 - `Ctrl+D`, `Ctrl+G`, `Home` and `End` were implemented but absent from both

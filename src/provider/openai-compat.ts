@@ -85,10 +85,13 @@ export class OpenAICompatProvider implements Provider {
     return headers;
   }
 
-  async listModels(): Promise<ModelInfo[]> {
+  async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
     let res: Response;
     try {
-      res = await fetch(this.url("/models"), { headers: this.headers("application/json") });
+      res = await fetch(this.url("/models"), {
+        headers: this.headers("application/json"),
+        ...(signal !== undefined ? { signal } : {}),
+      });
     } catch (cause) {
       throw new ProviderError(
         `Cannot reach ${this.config.baseURL}: ${(cause as Error).message}`,

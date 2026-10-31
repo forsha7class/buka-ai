@@ -17,7 +17,8 @@ import type { PickerItem } from "./dialogs.js";
 export interface CommandContext {
   dispatch: (action: Action) => void;
   exit: () => void;
-  openModelPicker: () => Promise<void>;
+  openModelPicker: (providerId?: string) => Promise<void>;
+  openProviderPicker: () => void;
   openSessionPicker: () => Promise<void>;
   startNewSession: () => void;
   compactContext: () => Promise<void>;
@@ -58,6 +59,23 @@ export const COMMANDS: Command[] = [
     name: "models",
     description: "list every available model",
     run: (context, _args, raw) => listModels(context, raw),
+  },
+  {
+    name: "provider",
+    args: "[id]",
+    description: "switch provider or add one",
+    run: (context, args) => {
+      if (args.length > 0) {
+        const id = args.split(/\s+/)[0]!;
+        if (!context.runtime.registry.get(id)) {
+          reply(context, `/provider ${args}`, `unknown provider "${id}". Try /provider for the list.`);
+          return;
+        }
+        void context.openModelPicker(id);
+        return;
+      }
+      context.openProviderPicker();
+    },
   },
   {
     name: "sessions",

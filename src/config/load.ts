@@ -116,9 +116,21 @@ export function writeStarterConfig(overwrite = false): string {
 }
 
 function starterConfig(): string {
-  const localKey = join(homedir(), ".config", "opencode", "9router.key");
-  const keyRef = existsSync(localKey) ? `{file:${localKey}}` : "{env:BUKA_9ROUTER_KEY}";
+  const localKey = find9RouterKey();
+  const keyRef = localKey ? `{file:${localKey}}` : "{env:BUKA_9ROUTER_KEY}";
   return STARTER_CONFIG.replace("__API_KEY__", keyRef);
+}
+
+/** Common locations used by 9Router's OpenCode integration and local installs. */
+function find9RouterKey(): string | undefined {
+  for (const path of [
+    join(homedir(), ".config", "opencode", "9router.key"),
+    join(homedir(), ".config", "opencode", "9router-api-key"),
+    "/opt/9router/api-key.txt",
+  ]) {
+    if (existsSync(path)) return path;
+  }
+  return undefined;
 }
 
 function parseFile(file: string): Record<string, unknown> {
@@ -184,7 +196,7 @@ function materialize(config: Config, warnings: string[]): ResolvedConfig {
     providers[id] = {
       id,
       name: provider.name ?? id,
-      type: "openai-compatible",
+      type: provider.type,
       baseURL: provider.baseURL,
       apiKey,
       headers: provider.headers,
@@ -240,11 +252,12 @@ function defaultConfig(): Record<string, unknown> {
   const providers: Record<string, unknown> = {};
 
   // Prefer a local key file when one exists so `buka` works with zero setup.
-  const localKey = join(homedir(), ".config", "opencode", "9router.key");
-  const routerKey = existsSync(localKey) ? `{file:${localKey}}` : "{env:BUKA_9ROUTER_KEY}";
+  const localKey = find9RouterKey();
+  const routerKey = localKey ? `{file:${localKey}}` : "{env:BUKA_9ROUTER_KEY}";
 
   providers["9router"] = {
     name: "9Router",
+    type: "openai-compatible",
     baseURL: process.env["BUKA_9ROUTER_URL"] ?? "http://127.0.0.1:20128/v1",
     apiKey: routerKey,
     discover: true,
@@ -254,8 +267,34 @@ function defaultConfig(): Record<string, unknown> {
   if (process.env["OPENAI_BASE_URL"] || process.env["OPENAI_API_KEY"]) {
     providers["openai"] = {
       name: "OpenAI",
+      type: "openai-compatible",
       baseURL: process.env["OPENAI_BASE_URL"] ?? "https://api.openai.com/v1",
       apiKey: "{env:OPENAI_API_KEY}",
+      discover: true,
+      models: {},
+    };
+  }
+
+  if (process.env["ANTHROPIC_API_KEY"]) {
+    providers["anthropic"] = {
+      name: "Anthropic",
+      type: "anthropic",
+      baseURL: "https://api.anthropic.com/v1",
+      apiKey: "{env:ANTHROPIC_API_KEY}",
+      discover: true,
+      models: {},
+    };
+  }
+
+  if (process.env["GEMINI_API_KEY"] || process.env["GOOGLE_API_KEY"]) {
+    providers["google"] = {
+      name: "Google Gemini",
+      type: "google",
+      baseURL: "https://generativelanguage.googleapis.com/v1beta",
+      apiKey:
+        process.env["GEMINI_API_KEY"] !== undefined
+          ? "{env:GEMINI_API_KEY}"
+          : "{env:GOOGLE_API_KEY}",
       discover: true,
       models: {},
     };

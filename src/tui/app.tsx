@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { render, useApp, useInput, useWindowSize } from "ink";
+import { Box, render, useApp, useInput, useWindowSize } from "ink";
 import {
   useCallback,
   useEffect,
@@ -15,6 +15,8 @@ import {
 import { runAgent } from "../agent/loop.js";
 import { createDefaultTools } from "../agent/tools/index.js";
 import type { PermissionRequest } from "../agent/tools/types.js";
+import type { ProviderSetupResult } from "../config/setup.js";
+import { SetupApp } from "../setup/app.js";
 import type { ChatMessage, ToolCall } from "../provider/types.js";
 import type { Runtime } from "../runtime.js";
 import { SessionStore, type Session, type StoredPart, type ToolResultRecord } from "../session/store.js";
@@ -69,7 +71,7 @@ export interface TuiOptions {
   onState?: (state: AppState) => void;
 }
 
-type Overlay = null | "models" | "sessions" | "commands" | "queue";
+type Overlay = null | "models" | "sessions" | "commands" | "queue" | "providers";
 
 const COMPACT_PROMPT = [
   "Summarise the conversation above so it can replace the transcript as working context.",
@@ -90,6 +92,7 @@ const OVERLAY_TITLES: Record<Exclude<Overlay, null>, string> = {
   sessions: "resume session",
   commands: "commands",
   queue: "queued messages",
+  providers: "providers",
 };
 
 const OVERLAY_HINTS: Record<Exclude<Overlay, null>, string> = {
@@ -97,6 +100,7 @@ const OVERLAY_HINTS: Record<Exclude<Overlay, null>, string> = {
   sessions: "enter resume · type to filter · esc close",
   commands: "enter run · type to filter · esc close",
   queue: "enter remove · esc close",
+  providers: "enter choose model · a add provider · type to filter · esc close",
 };
 
 const MAX_COMPLETIONS = 6;
@@ -140,6 +144,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       resume?.metaSnapshot.modelRef ?? `${runtime.model.providerId}/${runtime.model.key}`,
   }));
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [providerSetup, setProviderSetup] = useState(false);
   const [picker, setPicker] = useState<{ items: PickerItem[]; index: number }>({
     items: [],
     index: 0,
@@ -533,13 +538,15 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     [runtime.registry, systemPrompt],
   );
 
-  const openModelPicker = useCallback(async (): Promise<void> => {
+  const openModelPicker = useCallback(async (providerId?: string): Promise<void> => {
     setOverlay("models");
     setFilter("");
     setPickerError(null);
     setPickerLoading(true);
     try {
-      const models = await runtime.registry.listModels();
+      const models = (await runtime.registry.listModels()).filter(
+        (model) => providerId === undefined || model.providerId === providerId,
+      );
       const items = models.map((model) => ({
         reference: model.reference,
         detail: [
@@ -563,6 +570,55 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       setPickerLoading(false);
     }
   }, [activeModel.reference, runtime.registry]);
+
+  const openProviderPicker = useCallback((): void => {
+    setOverlay("providers");
+    setFilter("");
+    setPickerError(null);
+    setPickerLoading(false);
+    const items: PickerItem[] = [
+      { reference: "+add", detail: "add a provider and API key" },
+      ...Object.entries(runtime.config.providers).map(([id, provider]) => {
+        const modelCount = Object.keys(provider.models).length;
+        const key = provider.apiKey
+          ? provider.apiKey.startsWith("{env:")
+            ? "env key"
+            : "key saved"
+          : "no key";
+        return {
+          reference: id,
+          detail: `${provider.name} · ${modelCount || "?"} models · ${key}`,
+        };
+      }),
+    ];
+    setPicker({ items, index: 0 });
+  }, [runtime.config.providers]);
+
+  const finishProviderSetup = useCallback(
+    (result: ProviderSetupResult): void => {
+      try {
+        runtime.reload();
+        const resolved = runtime.registry.resolve(result.modelRef);
+        runtime.model = resolved;
+        setActiveModel({
+          provider: resolved.provider,
+          modelId: resolved.modelId,
+          reference: result.modelRef,
+        });
+        dispatch({ type: "set_model", modelRef: result.modelRef, model: resolved.modelId });
+        sessionRef.current?.setModel(result.modelRef, resolved.modelId);
+        messagesRef.current = [
+          { role: "system", content: systemPrompt },
+          ...messagesRef.current.filter((message) => message.role !== "system"),
+        ];
+        setProviderSetup(false);
+        setPickerError(null);
+      } catch (cause) {
+        setPickerError((cause as Error).message);
+      }
+    },
+    [runtime, systemPrompt],
+  );
 
   const openCommandPalette = useCallback((): void => {
     setOverlay("commands");
@@ -745,6 +801,7 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
     dispatch,
     exit,
     openModelPicker,
+    openProviderPicker,
     openSessionPicker,
     startNewSession,
     compactContext,
@@ -812,14 +869,39 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
         setOverlay(null);
         return;
       }
+      if (overlay === "providers") {
+        if (item.reference === "+add" && busyRef.current) {
+          setPicker({ items: [], index: 0 });
+          setPickerError("stop the current run before adding a provider");
+          return;
+        }
+        setOverlay(null);
+        if (item.reference === "+add") {
+          setProviderSetup(true);
+          return;
+        }
+        void openModelPicker(item.reference);
+        return;
+      }
     },
-    [commandContext, overlay, picker.items, removeQueued, resumeSession, switchModel],
+    [
+      commandContext,
+      openModelPicker,
+      overlay,
+      picker.items,
+      removeQueued,
+      resumeSession,
+      switchModel,
+    ],
   );
 
   // ---------------------------------------------------------------------------
   // Keys
   // ---------------------------------------------------------------------------
   useInput((input, key) => {
+    // The embedded setup wizard owns the keyboard while it is open.
+    if (providerSetup) return;
+
     // 1. Permission prompt owns the keyboard.
     if (state.pendingPermission) {
       if (input === "y" || input === "Y") answerPermission(true);
@@ -843,6 +925,17 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
       if (key.escape) {
         setOverlay(null);
         setFilter("");
+        return;
+      }
+      if (overlay === "providers" && input === "a" && !key.ctrl && !key.meta) {
+        if (busyRef.current) {
+          setPicker({ items: [], index: 0 });
+          setPickerError("stop the current run before adding a provider");
+          return;
+        }
+        setOverlay(null);
+        setFilter("");
+        setProviderSetup(true);
         return;
       }
       if (key.backspace || key.delete) {
@@ -1095,6 +1188,20 @@ export function App({ runtime, cwd, yolo, session, store, onState }: TuiOptions)
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+  if (providerSetup) {
+    return (
+      <Box flexDirection="column" width={columns} height={rows}>
+        <SetupApp
+          width={columns}
+          height={rows}
+          {...(runtime.configPath ? { configPath: runtime.configPath } : {})}
+          onSaved={finishProviderSetup}
+          onCancel={() => setProviderSetup(false)}
+        />
+      </Box>
+    );
+  }
+
   return (
     <TuiView
       state={state}
@@ -1128,6 +1235,7 @@ function emptyText(overlay: Overlay): string {
   if (overlay === "models") return "no models available";
   if (overlay === "sessions") return "no saved sessions yet";
   if (overlay === "queue") return "nothing queued";
+  if (overlay === "providers") return "no providers configured";
   return "no commands";
 }
 

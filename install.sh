@@ -261,3 +261,7 @@ if [ "$ON_PATH" -eq 1 ]; then
 else
   say "Start it with: $TARGET"
 fi
+say ""
+say "The first run opens a provider picker, so have an API key ready."
+say "9Router, OpenAI, OpenRouter, Anthropic, Gemini, local endpoints and custom"
+say "OpenAI-compatible providers are all supported."

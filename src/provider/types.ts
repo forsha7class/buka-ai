@@ -102,16 +102,18 @@ export interface ModelInfo {
   input?: Array<"text" | "image">;
 }
 
+export type ProviderType = "openai-compatible" | "anthropic" | "google";
+
 export interface Provider {
   readonly id: string;
   readonly name: string;
-  listModels(): Promise<ModelInfo[]>;
+  listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
   stream(req: ChatRequest): AsyncGenerator<ProviderEvent, void, undefined>;
 }
 
 export interface ProviderConfig {
   name?: string;
-  type?: "openai-compatible";
+  type?: ProviderType;
   baseURL: string;
   apiKey?: string;
   headers?: Record<string, string>;

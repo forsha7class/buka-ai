@@ -7,6 +7,9 @@
 
   "$schema": "https://raw.githubusercontent.com/.buka/config.json",
 
+  // Run `buka setup` to build this section interactively. Keys entered there
+  // live in ~/.config/buka-ai/secrets/<provider>.key (mode 0600), not here.
+  //
   // "provider/modelKey" — only the FIRST slash separates the two.
   "model": "9router/davo",
 

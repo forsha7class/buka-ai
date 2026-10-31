@@ -1,4 +1,4 @@
-import { OpenAICompatProvider } from "./openai-compat.js";
+import { createProvider } from "./factory.js";
 import type { ModelConfig, ModelInfo, Provider, ProviderConfig } from "./types.js";
 
 export class ModelNotFoundError extends Error {
@@ -33,11 +33,18 @@ export class ProviderRegistry {
   private readonly discovered = new Map<string, ModelInfo[]>();
 
   constructor(configs: Record<string, ProviderConfig>) {
+    this.replaceAll(configs);
+  }
+
+  /** Replaces every provider, used after setup rewrites the config. */
+  replaceAll(configs: Record<string, ProviderConfig>): void {
+    this.entries.clear();
+    this.discovered.clear();
     for (const [id, config] of Object.entries(configs)) {
       this.entries.set(id, {
         id,
         name: config.name ?? id,
-        provider: new OpenAICompatProvider(id, config),
+        provider: createProvider(id, config),
         config,
       });
     }

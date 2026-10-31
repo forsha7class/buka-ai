@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { ProviderType } from "../provider/types.js";
+
 const PermissionMode = z.enum(["ask", "allow", "deny"]);
 export type PermissionMode = z.infer<typeof PermissionMode>;
 
@@ -18,7 +20,7 @@ export type ModelConfig = z.infer<typeof ModelSchema>;
 
 const ProviderSchema = z.object({
   name: z.string().optional(),
-  type: z.literal("openai-compatible").default("openai-compatible"),
+  type: z.enum(["openai-compatible", "anthropic", "google"]).default("openai-compatible"),
   baseURL: z.string().min(1),
   /**
    * Literal value, or a reference: `{env:VAR}` / `{file:/path/to/key}`.
@@ -88,7 +90,7 @@ export interface ResolvedConfig {
 export interface ResolvedProviderConfig {
   id: string;
   name: string;
-  type: "openai-compatible";
+  type: ProviderType;
   baseURL: string;
   apiKey: string | undefined;
   headers: Record<string, string> | undefined;

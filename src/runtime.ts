@@ -23,6 +23,8 @@ export interface Runtime {
   config: ResolvedConfig;
   registry: ProviderRegistry;
   model: ResolvedModel;
+  /** Explicit config path, when the user passed `--config`. */
+  configPath?: string;
   /** Assembled system prompt — the single prompt every runner uses. */
   systemPrompt: string;
   /** Where that prompt came from, for `--show-prompt` and diagnostics. */
@@ -32,6 +34,8 @@ export interface Runtime {
   warnings: string[];
   /** Notes about automatic decisions (e.g. a model chosen by discovery). */
   notes: string[];
+  /** Re-read config and rebuild providers after setup changes it. */
+  reload(): void;
 }
 
 /**
@@ -49,13 +53,9 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
     ...(options.ignoreProject !== undefined ? { ignoreProject: options.ignoreProject } : {}),
   };
-  const { config, sources, warnings } = loadConfig(loadOptions);
-
-  const providerConfigs: Record<string, ProviderConfig> = {};
-  for (const [id, provider] of Object.entries(config.providers)) {
-    providerConfigs[id] = toProviderConfig(provider);
-  }
-
+  const loaded = loadConfig(loadOptions);
+  const config = loaded.config;
+  const providerConfigs = toProviderConfigs(config.providers);
   const registry = new ProviderRegistry(providerConfigs);
   const notes: string[] = [];
 
@@ -76,16 +76,36 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     notes.push(`auto-selected model ${reference}`);
   }
 
-  return {
+  const runtime: Runtime = {
     config,
     registry,
+    ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
     model: registry.resolve(reference),
     systemPrompt: buildSystemPrompt({ cwd: sessionCwd, tools, prompt: prompt.text }),
     promptSource: prompt,
-    sources,
-    warnings,
+    sources: loaded.sources,
+    warnings: loaded.warnings,
     notes,
+    reload: () => {
+      const next = loadConfig(loadOptions);
+      runtime.config = next.config;
+      runtime.sources = next.sources;
+      runtime.warnings = next.warnings;
+      runtime.registry.replaceAll(toProviderConfigs(next.config.providers));
+    },
   };
+
+  return runtime;
+}
+
+function toProviderConfigs(
+  providers: Record<string, ResolvedProviderConfig>,
+): Record<string, ProviderConfig> {
+  const configs: Record<string, ProviderConfig> = {};
+  for (const [id, provider] of Object.entries(providers)) {
+    configs[id] = toProviderConfig(provider);
+  }
+  return configs;
 }
 
 async function autoSelectModel(
@@ -95,7 +115,7 @@ async function autoSelectModel(
 ): Promise<string> {
   if (registry.providerIds().length === 0) {
     throw new Error(
-      "No providers configured. Add a `providers` entry to your config, or run `buka init`.",
+      "No providers configured. Run `buka setup` to add one, or add a `providers` entry to your config.",
     );
   }
 
@@ -128,14 +148,14 @@ async function autoSelectModel(
 
   throw new Error(
     `Could not choose a model automatically.\n${failures.map((line) => `  • ${line}`).join("\n")}\n` +
-      `Pass --model provider/model, or set "model" in your config.`,
+      `Run \`buka setup\`, pass --model provider/model, or set "model" in your config.`,
   );
 }
 
 function toProviderConfig(provider: ResolvedProviderConfig): ProviderConfig {
   return {
     name: provider.name,
-    type: "openai-compatible",
+    type: provider.type,
     baseURL: provider.baseURL,
     ...(provider.apiKey !== undefined ? { apiKey: provider.apiKey } : {}),
     ...(provider.headers !== undefined ? { headers: provider.headers } : {}),

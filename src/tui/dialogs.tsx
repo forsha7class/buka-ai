@@ -22,6 +22,8 @@ export interface DialogSpec {
   /** Enables the filter input row and renders the current text. */
   filter?: string;
   filterLabel?: string;
+  /** Optional informational line above the list (used for setup errors). */
+  note?: string;
   items: PickerItem[];
   index: number;
   hint: string;
@@ -40,8 +42,9 @@ export function dialogLines(spec: DialogSpec, width: number, height: number): Li
   const boxWidth = clamp(Math.min(width - 4, 78), 20, Math.max(20, width));
   const innerWidth = boxWidth - 4;
   const hasFilter = spec.filter !== undefined;
+  const hasNote = spec.note !== undefined;
 
-  const reserved = 2 /* top + bottom border */ + (hasFilter ? 1 : 0);
+  const reserved = 2 /* top + bottom border */ + (hasFilter ? 1 : 0) + (hasNote ? 1 : 0);
   const listMax = clamp(height - reserved, 0, MAX_ITEMS);
   const listRows = spec.items.length === 0 ? 1 : Math.min(spec.items.length, listMax);
 
@@ -53,6 +56,19 @@ export function dialogLines(spec: DialogSpec, width: number, height: number): Li
   const box: Line[] = [];
   box.push(titleBar(spec, boxWidth));
   if (hasFilter) box.push(contentRow(filterRow(spec, innerWidth), innerWidth));
+  if (spec.note) {
+    box.push(
+      contentRow(
+        [
+          {
+            text: truncateToWidth(spec.note.replace(/\s+/g, " "), innerWidth),
+            style: { color: palette.error },
+          },
+        ],
+        innerWidth,
+      ),
+    );
+  }
   if (spec.items.length === 0) {
     box.push(contentRow([{ text: spec.empty, style: { color: palette.muted } }], innerWidth));
   } else {
@@ -74,6 +90,88 @@ export function dialogLines(spec: DialogSpec, width: number, height: number): Li
   for (const line of box) out.push(center(line, width, boxWidth));
   while (out.length < height) out.push([]);
 
+  return out;
+}
+
+export interface FormSpec {
+  title: string;
+  subtitle?: string;
+  label: string;
+  value: string;
+  masked?: boolean;
+  note?: string;
+  error?: string;
+  hint: string;
+}
+
+/**
+ * A compact single-field panel used by the first-run setup wizard. It shares
+ * the dialog frame so the wizard looks like the rest of buka rather than like
+ * a separate application.
+ */
+export function formLines(spec: FormSpec, width: number, height: number): Line[] {
+  const boxWidth = clamp(Math.min(width - 4, 78), 20, Math.max(20, width));
+  const innerWidth = boxWidth - 4;
+  const box: Line[] = [];
+  box.push(titleBar(spec, boxWidth));
+  if (spec.subtitle) {
+    box.push(
+      contentRow([{ text: truncateToWidth(spec.subtitle, innerWidth), style: { color: palette.muted } }], innerWidth),
+    );
+  }
+  box.push(contentRow([{ text: spec.label, style: { color: palette.faint } }], innerWidth));
+
+  const budget = Math.max(1, innerWidth - 4);
+  const shown = spec.masked
+    ? "•".repeat(Math.min(spec.value.length, budget))
+    : spec.value.length > budget
+      ? `…${spec.value.slice(-(budget - 1))}`
+      : spec.value;
+  box.push(
+    contentRow(
+      [
+        { text: "› ", style: { color: palette.accent, bold: true } },
+        { text: shown, style: { color: palette.text } },
+        { text: "▏", style: { color: palette.accent } },
+      ],
+      innerWidth,
+      palette.panel,
+    ),
+  );
+
+  if (spec.note) {
+    box.push(
+      contentRow(
+        [
+          {
+            text: truncateToWidth(spec.note.replace(/\s+/g, " "), innerWidth),
+            style: { color: palette.faint },
+          },
+        ],
+        innerWidth,
+      ),
+    );
+  }
+  if (spec.error) {
+    box.push(
+      contentRow(
+        [
+          {
+            text: truncateToWidth(spec.error.replace(/\s+/g, " "), innerWidth),
+            style: { color: palette.error },
+          },
+        ],
+        innerWidth,
+      ),
+    );
+  }
+  box.push(hintBar(spec.hint, boxWidth));
+
+  const topPad = Math.max(0, Math.floor((height - box.length) / 2));
+  const out: Line[] = [];
+  for (let index = 0; index < topPad; index++) out.push([]);
+  for (const line of box) out.push(center(line, width, boxWidth));
+  while (out.length < height) out.push([]);
   return out;
 }
 
@@ -121,7 +219,7 @@ function centeredBar(
   ];
 }
 
-function titleBar(spec: DialogSpec, boxWidth: number): Line {
+function titleBar(spec: { title: string; subtitle?: string }, boxWidth: number): Line {
   const subtitle = spec.subtitle ? `  ${spec.subtitle}` : "";
   let label = ` ${spec.title}${subtitle} `;
   if (stringWidth(label) > boxWidth - 4) label = truncateToWidth(label, Math.max(1, boxWidth - 4));

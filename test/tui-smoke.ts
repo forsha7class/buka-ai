@@ -216,9 +216,11 @@ async function main(): Promise<number> {
     const expectOverlayClosed = async (label: string, pattern: RegExp): Promise<void> => {
       stdout.clear();
       stdin.write("\u001b"); // escape
-      await delay(400);
+      await delay(500);
+      // Drop any in-flight repaint of the old frame before checking the next one.
+      stdout.clear();
       stdin.write("x"); // force a repaint (inserted only if the overlay is gone)
-      await delay(400);
+      await delay(500);
       const fresh = stdout.text();
       expect(`${label} escape closes the overlay`, !pattern.test(fresh));
       expect(`${label} repaints afterwards`, fresh.length > 0);

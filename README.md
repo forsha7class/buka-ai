@@ -6,7 +6,7 @@
 
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-233%20passing-3fb950)](#testing)
+[![Tests](https://img.shields.io/badge/tests-245%20passing-3fb950)](#testing)
 [![TUI checks](https://img.shields.io/badge/TUI%20checks-35%20passing-3fb950)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 
@@ -129,8 +129,10 @@ buka -c                       # resume the latest session in this directory
 
 ### Provider-agnostic
 
-- Works with OpenAI, OpenRouter, Groq, Ollama, llama.cpp, vLLM, or a local
-  gateway in front of them.
+- Works with OpenAI, OpenRouter, Groq, Ollama, llama.cpp, vLLM, 9Router, or a
+  local gateway in front of them.
+- Native Anthropic and Google Gemini adapters, including tools, reasoning blocks
+  and usage accounting.
 - Models can be discovered from `/v1/models` or declared explicitly.
 - Switch models mid-session without restarting.
 
@@ -139,7 +141,7 @@ buka -c                       # resume the latest session in this directory
 ## Requirements
 
 - **Node.js >= 22**
-- An OpenAI-compatible API endpoint (local or hosted)
+- An OpenAI-compatible endpoint, or an Anthropic/Gemini API key
 - Optional: [`ripgrep`](https://github.com/BurntSushi/ripgrep) for faster `grep`
   (a JavaScript fallback is built in)
 
@@ -193,7 +195,26 @@ rm -rf ~/.buka-ai
 
 ## Quick start
 
-Point `buka` at a provider using environment variables:
+If no provider is configured yet, the first run opens a provider picker:
+
+```bash
+buka
+```
+
+Choose a provider, paste your API key, and pick a model. The key is written to
+`~/.config/buka-ai/secrets/<provider>.key` with `0600` permissions; the config
+only stores a `{file:...}` reference.
+
+The list includes **9Router**, OpenAI, OpenRouter, Anthropic, Google Gemini,
+DeepSeek, Groq, xAI, Mistral, Together AI, Fireworks, Ollama, LM Studio, and a
+**Custom** entry for any OpenAI-compatible endpoint. Providers can be added or
+changed later with:
+
+```bash
+buka setup
+```
+
+Environment-only setups still work:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -201,23 +222,18 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 buka
 ```
 
-For a persistent setup with multiple providers, permissions, and themes:
+For a starter file without the interactive picker (scripts/CI):
 
 ```bash
-buka init       # writes ~/.config/buka-ai/buka.jsonc
+buka init --yes
 $EDITOR ~/.config/buka-ai/buka.jsonc
-```
-
-Then start the TUI:
-
-```bash
-buka
 ```
 
 Useful first commands inside the TUI:
 
 ```text
 /help          show commands and keybindings
+/provider      switch provider or add one
 /models        list available models
 /theme         switch the colour palette
 ```
@@ -236,7 +252,8 @@ Useful first commands inside the TUI:
 | `buka -s <id>` | Resume a specific session. |
 | `buka models` | List every available model. |
 | `buka sessions` | List saved sessions. |
-| `buka init` | Write a starter config file. |
+| `buka setup` | Add or change a provider and API key interactively. |
+| `buka init` | Set up a provider interactively; `--yes` writes a starter config file. |
 
 | Flag | Description |
 |---|---|
@@ -252,6 +269,7 @@ Useful first commands inside the TUI:
 | `--verbose` | Stream reasoning and token usage to stderr. |
 | `--list-models` | List available models (same as `buka models`). |
 | `--show-prompt` | Print the assembled system prompt and exit. |
+| `--yes` | With `init`, write the starter config without the interactive picker. |
 | `-h, --help` | Show help. |
 | `-v, --version` | Print the version. |
 
@@ -301,6 +319,7 @@ buka --show-prompt
 | `/help` | Show commands and keybindings. |
 | `/model [ref]` | Switch model; without an argument, open the model picker. |
 | `/models` | List every available model. |
+| `/provider [id]` | Switch provider, or open the provider manager to add one. |
 | `/sessions` | Browse and resume past sessions. |
 | `/new` | Start a fresh session. |
 | `/rename <title>` | Name the current session. |
@@ -371,13 +390,29 @@ Configuration is loaded from:
 
 ### Providers
 
-Any OpenAI-compatible endpoint works. A provider entry needs a `baseURL`; the API
-key may be a literal value, `{env:VAR}`, or `{file:/path/to/key}`.
+Run `buka setup` (or just start `buka` for the first time) to pick a provider.
+The picker has presets for 9Router, OpenAI, OpenRouter, Anthropic, Google Gemini,
+DeepSeek, Groq, xAI, Mistral, Together AI, Fireworks, Ollama, LM Studio, and any
+custom OpenAI-compatible endpoint. Anthropic and Gemini use native adapters;
+everything else uses the OpenAI-compatible client.
 
-If no config exists and `OPENAI_API_KEY` is set, `buka` creates a built-in
-provider from `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`). A config
-that only sets some keys still keeps the built-in provider unless it defines
-`providers` itself.
+A provider entry needs a `baseURL`; `type` is one of `openai-compatible`
+(default), `anthropic`, or `google`. The API key may be a literal value,
+`{env:VAR}`, or `{file:/path/to/key}`. Setup stores typed keys in
+`~/.config/buka-ai/secrets/<provider>.key` (mode `0600`) and writes a
+`{file:...}` reference into the config.
+
+If no config exists and `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+or `BUKA_9ROUTER_KEY` is set, `buka` uses the matching built-in provider. A
+config that only sets some keys still keeps the built-in provider unless it
+defines `providers` itself.
+
+Use `/provider` inside the TUI to see configured providers, add a new one, or
+switch to another provider's models without restarting.
+
+Setup merges the new provider into the existing global config and keeps a
+`buka.jsonc.bak` before rewriting it. The rewrite normalizes formatting, so
+comments in a hand-edited file may be dropped; the backup keeps the original.
 
 **Model references split on the first slash only.** Model ids legitimately
 contain slashes (`Hr/claude-sonnet-4.6`, `@cf/meta/llama-3.2-1b-instruct`), so
@@ -447,10 +482,18 @@ src/
 ├─ config/
 │  ├─ schema.ts             zod schema (the config contract)
 │  ├─ load.ts               JSONC loader, merging, secret resolution
+│  ├─ providers.ts          provider presets for first-run setup
+│  ├─ setup.ts              provider wizard persistence + discovery
 │  └─ paths.ts              XDG paths
+├─ setup/
+│  ├─ app.tsx               first-run / in-TUI provider picker
+│  └─ run.ts                standalone setup renderer
 ├─ provider/
 │  ├─ types.ts              wire types + normalized event stream
+│  ├─ factory.ts            chooses the native or compatible adapter
 │  ├─ openai-compat.ts      /chat/completions client (SSE)
+│  ├─ anthropic.ts          Anthropic Messages API adapter
+│  ├─ google.ts             Gemini streamGenerateContent adapter
 │  └─ registry.ts           "provider/model" resolution, discovery
 ├─ agent/
 │  ├─ loop.ts               the agent loop: stream → tools → repeat
@@ -481,7 +524,10 @@ src/
 A request flows through five layers, each with a single responsibility:
 
 ```text
-cli.tsx ──► runtime.ts ──► agent/loop.ts ──► provider/openai-compat.ts ──► network
+cli.tsx ──► runtime.ts ──► agent/loop.ts ──► provider/factory.ts ──► network
+                                                ├─ openai-compat.ts
+                                                ├─ anthropic.ts
+                                                └─ google.ts
                               │
                               ├─► tools/* ──► filesystem / shell
                               └─► events ──► tui/app.tsx  (or)  run/print.ts
@@ -559,7 +605,7 @@ painted above the composer, then drained when the turn finishes.
 ## Testing
 
 ```bash
-npm test              # 233 unit and integration tests, no network required
+npm test              # 245 unit and integration tests, no network required
 npm run test:smoke    # 35 end-to-end TUI checks (requires a live provider)
 npm run typecheck     # src + tests, strict, noUnusedLocals
 ```
@@ -573,7 +619,9 @@ invariants.
 
 The agent loop is tested directly with a scripted fake provider, so multi-turn
 tool chaining, permission modes, the turn ceiling, aborts, malformed tool
-arguments, and provider failures are deterministic and instant.
+arguments, and provider failures are deterministic and instant. Provider setup
+tests cover config merging and secret permissions, and the native Anthropic and
+Gemini adapters are exercised against local SSE fixtures.
 
 Two suites exist specifically to prevent documentation drift: one reads the real
 key handlers and command registry and requires them to be documented in both
@@ -651,8 +699,8 @@ An honest list, not a roadmap:
   is shown verbatim.
 - **`grep` prefers `rg`** and falls back to a JavaScript walker (slower; skips
   files over 4 MB and build/vendor directories).
-- **One transport: `openai-compatible`.** There is no native Anthropic Messages
-  API and no OAuth flow.
+- **API keys, not OAuth.** Providers are configured with a key; browser/OAuth
+  login flows are not implemented.
 - **Images and PDFs** are typed but not yet plumbed from the TUI into requests.
 
 ---

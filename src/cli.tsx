@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { ConfigError, writeStarterConfig } from "./config/load.js";
+import { globalConfigPaths, projectConfigPaths } from "./config/paths.js";
+import type { ProviderSetupResult } from "./config/setup.js";
 import { resolvePrompt } from "./agent/prompt.js";
 import { createDefaultTools } from "./agent/tools/index.js";
 import { createRuntime, type Runtime } from "./runtime.js";
@@ -25,6 +27,7 @@ const FLAGS: FlagSpec[] = [
   { name: "max-turns", value: true },
   { name: "list-models" },
   { name: "show-prompt" },
+  { name: "yes" },
 ];
 
 function version(): string {
@@ -46,7 +49,8 @@ ${style.bold("USAGE")}
   buka -p "<prompt>"           one-shot: print the answer and exit
   buka models                  list available models
   buka sessions                list saved sessions
-  buka init                    write a starter config file
+  buka setup                   add or change a provider and API key
+  buka init                    set up a provider (starter config with --yes)
 
 ${style.bold("OPTIONS")}
   -m, --model <provider/model>   override the configured model
@@ -61,12 +65,14 @@ ${style.bold("OPTIONS")}
       --verbose                  stream reasoning + token usage to stderr
       --list-models              list available models
       --show-prompt              print the system prompt that would be sent
+      --yes                      with init: write the starter config non-interactively
   -h, --help                     show this help
   -v, --version                  print the version
 
 ${style.bold("NOTES")}
   The system prompt lives in ~/.config/buka-ai/SYSTEM_PROMPT.md — edit it there,
   no rebuild needed. HTML comments in that file are not sent to the model.
+  Run \`buka setup\` to add a provider or replace an API key.
 
   Interactive runs are always saved. A one-shot run is saved only when it
   resumes a session (--continue / --session), so scripts stay ephemeral.
@@ -99,18 +105,52 @@ async function main(): Promise<number> {
   }
 
   const command = args.positionals[0];
+  const cwd = getString(args, "cwd") ?? process.cwd();
+  const prompt = getString(args, "print");
+  const configFlag = getString(args, "config");
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const readOnlyCommand =
+    command === "models" || command === "sessions" || getBool(args, "list-models");
+
+  if (command === "setup") {
+    if (!interactive) {
+      process.stderr.write(
+        `${color.red(symbol.fail)} provider setup needs an interactive terminal\n`,
+      );
+      return 1;
+    }
+    const result = await runSetupFlow(configFlag);
+    if (!result) return 1;
+    printSetupResult(result);
+    return 0;
+  }
 
   if (command === "init") {
-    try {
-      const configPath = writeStarterConfig(getBool(args, "yolo"));
-      // Also materialise the prompt file, so there is something to edit.
-      const prompt = resolvePrompt();
-      process.stdout.write(`${color.green(symbol.ok)} wrote ${configPath}\n`);
-      for (const note of prompt.notes) {
+    // In a terminal, `init` means "help me set up a provider". Scripts keep the
+    // old non-interactive starter-file behaviour with `--yes` (or `--yolo`).
+    if (interactive && !getBool(args, "yes") && !getBool(args, "yolo")) {
+      const result = await runSetupFlow(configFlag);
+      if (!result) return 1;
+      printSetupResult(result);
+      const promptFile = resolvePrompt();
+      for (const note of promptFile.notes) {
         process.stdout.write(`${color.dimGray("·")} ${style.dim(note)}\n`);
       }
       process.stdout.write(
-        `${color.dimGray("·")} ${style.dim(`system prompt: ${prompt.path}`)}\n`,
+        `${color.dimGray("·")} ${style.dim(`system prompt: ${promptFile.path}`)}\n`,
+      );
+      return 0;
+    }
+    try {
+      const configPath = writeStarterConfig(getBool(args, "yolo"));
+      // Also materialise the prompt file, so there is something to edit.
+      const promptFile = resolvePrompt();
+      process.stdout.write(`${color.green(symbol.ok)} wrote ${configPath}\n`);
+      for (const note of promptFile.notes) {
+        process.stdout.write(`${color.dimGray("·")} ${style.dim(note)}\n`);
+      }
+      process.stdout.write(
+        `${color.dimGray("·")} ${style.dim(`system prompt: ${promptFile.path}`)}\n`,
       );
       return 0;
     } catch (cause) {
@@ -119,23 +159,84 @@ async function main(): Promise<number> {
     }
   }
 
-  // Read-only subcommands should not create the user's prompt file as a side
-  // effect; they never send a prompt.
-  const readOnlyCommand =
-    command === "models" || command === "sessions" || getBool(args, "list-models");
+  const configAlreadyExists = configExists(configFlag, cwd);
+  const envProvider = Boolean(
+    process.env["OPENAI_API_KEY"] ||
+      process.env["OPENAI_BASE_URL"] ||
+      process.env["ANTHROPIC_API_KEY"] ||
+      process.env["GEMINI_API_KEY"] ||
+      process.env["GOOGLE_API_KEY"] ||
+      process.env["BUKA_9ROUTER_KEY"] ||
+      process.env["BUKA_MODEL"],
+  );
 
-  let runtime: Runtime;
-  try {
-    runtime = await createRuntime({
+  // A genuinely fresh install gets the provider picker before the first TUI.
+  // Environment-only setups keep working without an interactive detour.
+  if (
+    interactive &&
+    command === undefined &&
+    prompt === undefined &&
+    !getBool(args, "show-prompt") &&
+    !getBool(args, "list-models") &&
+    getString(args, "model") === undefined &&
+    !configAlreadyExists &&
+    !envProvider
+  ) {
+    const result = await runSetupFlow(configFlag);
+    if (!result) return 1;
+    printSetupResult(result);
+  }
+
+  const buildRuntime = (): Promise<Runtime> =>
+    createRuntime({
       ...(getString(args, "model") !== undefined ? { model: getString(args, "model")! } : {}),
-      ...(getString(args, "config") !== undefined ? { configPath: getString(args, "config")! } : {}),
+      ...(configFlag !== undefined ? { configPath: configFlag } : {}),
       ...(getString(args, "cwd") !== undefined ? { cwd: getString(args, "cwd")! } : {}),
       seedPrompt: !readOnlyCommand,
     });
+
+  let runtime: Runtime;
+  try {
+    runtime = await buildRuntime();
   } catch (cause) {
-    const message = cause instanceof ConfigError ? cause.message : String((cause as Error).message);
-    process.stderr.write(`${color.red(symbol.fail)} ${message}\n`);
-    return 1;
+    const canRepair =
+      interactive &&
+      command === undefined &&
+      prompt === undefined &&
+      !getBool(args, "show-prompt") &&
+      !getBool(args, "list-models") &&
+      getString(args, "model") === undefined &&
+      !(cause instanceof ConfigError);
+
+    if (!canRepair) {
+      const message =
+        cause instanceof ConfigError ? cause.message : String((cause as Error).message);
+      process.stderr.write(`${color.red(symbol.fail)} ${message}\n`);
+      return 1;
+    }
+
+    process.stderr.write(
+      `${color.yellow(symbol.warn)} ${style.dim((cause as Error).message)}\n`,
+    );
+    process.stderr.write(
+      `${color.dimGray("·")} ${style.dim("opening provider setup so you can fix it")}\n`,
+    );
+    const result = await runSetupFlow(configFlag);
+    if (!result) {
+      process.stderr.write(`${color.red(symbol.fail)} ${(cause as Error).message}\n`);
+      return 1;
+    }
+    printSetupResult(result);
+    try {
+      runtime = await buildRuntime();
+    } catch (retryCause) {
+      const message =
+        retryCause instanceof ConfigError
+          ? retryCause.message
+          : String((retryCause as Error).message);
+      process.stderr.write(`${color.red(symbol.fail)} ${message}\n`);
+      return 1;
+    }
   }
 
   for (const warning of runtime.warnings) {
@@ -158,7 +259,6 @@ async function main(): Promise<number> {
   }
 
   const store = new SessionStore();
-  const cwd = getString(args, "cwd") ?? process.cwd();
 
   if (command === "sessions") {
     return listSessions(store, cwd);
@@ -199,7 +299,6 @@ async function main(): Promise<number> {
       );
     }
   }
-  const prompt = getString(args, "print");
   const maxTurns = getString(args, "max-turns");
   const verbose = getBool(args, "verbose");
   const noTools = getBool(args, "no-tools");
@@ -260,6 +359,33 @@ async function main(): Promise<number> {
       return 1;
     }
     throw cause;
+  }
+}
+
+function configExists(configPath: string | undefined, cwd: string): boolean {
+  if (configPath) return existsSync(configPath);
+  return [...globalConfigPaths(), ...projectConfigPaths(cwd)].some(existsSync);
+}
+
+async function runSetupFlow(configPath: string | undefined): Promise<ProviderSetupResult | null> {
+  try {
+    const { runSetup } = await import("./setup/run.js");
+    return await runSetup(configPath !== undefined ? { configPath } : {});
+  } catch (cause) {
+    process.stderr.write(`${color.red(symbol.fail)} ${(cause as Error).message}\n`);
+    return null;
+  }
+}
+
+function printSetupResult(result: ProviderSetupResult): void {
+  process.stdout.write(`${color.green(symbol.ok)} saved ${result.configPath}\n`);
+  process.stdout.write(
+    `${color.dimGray("·")} ${style.dim(`default model: ${result.modelRef}`)}\n`,
+  );
+  if (result.secretPath) {
+    process.stdout.write(
+      `${color.dimGray("·")} ${style.dim(`api key: ${result.secretPath} (0600)`)}\n`,
+    );
   }
 }
 
