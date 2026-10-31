@@ -23,6 +23,9 @@
     <clipPath id="card-clip">
       <rect x="1" y="1" width="1198" height="358" rx="40"/>
     </clipPath>
+    <clipPath id="word-reveal">
+      <rect class="typing" x="592" y="110" width="372" height="96"/>
+    </clipPath>
   </defs>
 
   <style>
@@ -35,7 +38,8 @@
     .glyph-a { animation-delay: -1.6s; }
     .glyph-b { animation-delay: -3.2s; animation-duration: 6.8s; }
     .glyph-c { animation-delay: -4.8s; animation-duration: 5.6s; }
-    .word-cursor { animation: buka-cursor 1.15s steps(1) infinite; }
+    .typing { transform-box: fill-box; transform-origin: left center; animation: buka-type 14s both infinite; }
+    .word-cursor { animation: buka-cursor 1.15s steps(1) infinite, buka-cursor-track 14s both infinite; }
 
     @keyframes buka-float {
       0%, 100% { transform: translateY(0); }
@@ -64,8 +68,20 @@
       0%, 100% { opacity: 0.2; transform: translateY(0); }
       50% { opacity: 0.55; transform: translateY(-10px); }
     }
+    @keyframes buka-type {
+      0% { transform: scaleX(0.145); animation-timing-function: steps(7, end); }
+      17.143% { transform: scaleX(1); }
+      92% { transform: scaleX(1); animation-timing-function: steps(7, end); }
+      100% { transform: scaleX(0); }
+    }
+    @keyframes buka-cursor-track {
+      0% { transform: translateX(-333.45px); animation-timing-function: steps(7, end); }
+      17.143% { transform: translateX(0); }
+      92% { transform: translateX(0); animation-timing-function: steps(7, end); }
+      100% { transform: translateX(-390px); }
+    }
     @media (prefers-reduced-motion: reduce) {
-      .float, .eyes, .cursor, .glow, .shadow, .glyph, .word-cursor { animation: none; }
+      .float, .eyes, .cursor, .glow, .shadow, .glyph, .typing, .word-cursor { animation: none; }
     }
   </style>
 
@@ -112,8 +128,11 @@
       </g>
     </g>
 
-    <text x="592" y="188" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="96" font-weight="700" fill="#e7e9ee" textLength="403" lengthAdjust="spacing">buka <tspan fill="#e0a370">ai</tspan></text>
-    <rect class="word-cursor" x="1026" y="130" width="16" height="58" rx="3" fill="#e0a370"/>
+    <g clip-path="url(#word-reveal)">
+      <text x="592" y="188" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="96" font-weight="700" fill="#e7e9ee">buka</text>
+      <text x="846" y="188" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="96" font-weight="700" fill="#e0a370">ai</text>
+    </g>
+    <rect class="word-cursor" x="982" y="181" width="38" height="7" rx="3.5" fill="#e0a370"/>
     <text x="595" y="242" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" letter-spacing="4.2" fill="#9aa3b2">TERMINAL-NATIVE CODING AGENT</text>
   </g>
 
