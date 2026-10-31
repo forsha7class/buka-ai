@@ -63,7 +63,10 @@ for arg in "$@"; do
 done
 
 launcher_candidates() {
-  if [ -n "${BUKA_BIN_DIR:-}" ]; then printf '%s\n' "$BUKA_BIN_DIR"; fi
+  if [ -n "${BUKA_BIN_DIR:-}" ]; then
+    printf '%s\n' "$BUKA_BIN_DIR"
+    return 0
+  fi
   printf '%s\n' /usr/local/bin "$HOME/.local/bin" "$HOME/bin"
 }
 
