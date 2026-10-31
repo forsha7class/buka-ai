@@ -1,7 +1,7 @@
 <div align="center">
 
 <h1 align="center">
-  <img src="./assets/logo.svg" alt="buka ai" width="520">
+  <img src="./assets/logo.svg" alt="Buka, the terminal ghost, beside the buka ai wordmark" width="880">
 </h1>
 
 **A terminal-native AI coding agent with a full-screen TUI, real tool use, and resumable sessions.**

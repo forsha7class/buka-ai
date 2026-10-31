@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An animated Buka mascot.** The welcome banner blinks, floats and pulses its
   accent colour, with a compact variant for 24-row terminals. It respects
   `tui.animations` and `BUKA_NO_ANIMATION`.
+- **An animated GitHub banner.** The README header gives Buka a larger stage:
+  the mascot floats and blinks above a breathing glow, terminal glyphs drift
+  around it, and the wordmark gains a blinking cursor.
 - **New config:** `tui.sidebar` (`auto` | boolean) and `tui.animations`.
 - **New keybinding:** `Ctrl+B` toggles the sidebar.
 - A drift guard for the keybinding and slash-command documentation. It reads the

@@ -1,34 +1,121 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180" role="img" aria-labelledby="logo-title logo-desc">
-  <title id="logo-title">buka ai</title>
-  <desc id="logo-desc">Buka, a terminal ghost, beside the buka ai wordmark.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">Buka, the buka ai terminal ghost</title>
+  <desc id="logo-desc">Buka, a warm amber terminal ghost, floats inside a dark banner beside the buka ai wordmark and the tagline terminal-native coding agent.</desc>
+
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b1f27"/>
+      <stop offset="0.55" stop-color="#15171c"/>
+      <stop offset="1" stop-color="#121419"/>
+    </linearGradient>
+    <radialGradient id="mascot-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#e0a370" stop-opacity="0.32"/>
+      <stop offset="0.55" stop-color="#e0a370" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#e0a370" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mascot-shadow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#000000" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#e7e9ee" opacity="0.05"/>
+    </pattern>
+    <clipPath id="card-clip">
+      <rect x="1" y="1" width="1198" height="358" rx="40"/>
+    </clipPath>
+  </defs>
 
   <style>
-    .ghost { animation: buka-float 5.6s ease-in-out infinite; }
-    .eyes { transform-box: fill-box; transform-origin: center; animation: buka-blink 5.6s infinite; }
-    .cursor { animation: buka-cursor 1.4s steps(1) infinite; }
-    @keyframes buka-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-    @keyframes buka-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.08); } }
-    @keyframes buka-cursor { 0%, 49%, 100% { opacity: 1; } 50%, 99% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .ghost, .eyes, .cursor { animation: none; } }
+    .float { animation: buka-float 6.4s ease-in-out infinite; }
+    .eyes { transform-box: fill-box; transform-origin: center; animation: buka-blink 6.4s infinite; }
+    .cursor { animation: buka-cursor 1.15s steps(1) infinite; }
+    .glow { opacity: 0.65; transform-box: fill-box; transform-origin: center; animation: buka-glow 6.4s ease-in-out infinite; }
+    .shadow { opacity: 0.55; transform-box: fill-box; transform-origin: center; animation: buka-shadow 6.4s ease-in-out infinite; }
+    .glyph { opacity: 0.35; animation: buka-glyph 6s ease-in-out infinite; }
+    .glyph-a { animation-delay: -1.6s; }
+    .glyph-b { animation-delay: -3.2s; animation-duration: 6.8s; }
+    .glyph-c { animation-delay: -4.8s; animation-duration: 5.6s; }
+    .word-cursor { animation: buka-cursor 1.15s steps(1) infinite; }
+
+    @keyframes buka-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-11px); }
+    }
+    @keyframes buka-blink {
+      0%, 89%, 100% { transform: scaleY(1); }
+      91% { transform: scaleY(0.08); }
+      92.5% { transform: scaleY(1); }
+      94% { transform: scaleY(0.08); }
+      95.5% { transform: scaleY(1); }
+    }
+    @keyframes buka-cursor {
+      0%, 49%, 100% { opacity: 1; }
+      50%, 99% { opacity: 0; }
+    }
+    @keyframes buka-glow {
+      0%, 100% { opacity: 0.65; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.07); }
+    }
+    @keyframes buka-shadow {
+      0%, 100% { opacity: 0.55; transform: scaleX(1); }
+      50% { opacity: 0.3; transform: scaleX(0.86); }
+    }
+    @keyframes buka-glyph {
+      0%, 100% { opacity: 0.2; transform: translateY(0); }
+      50% { opacity: 0.55; transform: translateY(-10px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .float, .eyes, .cursor, .glow, .shadow, .glyph, .word-cursor { animation: none; }
+    }
   </style>
 
-  <rect x="1" y="1" width="718" height="178" rx="32" fill="#15171c" stroke="#2b3038" stroke-width="2"/>
+  <rect x="1" y="1" width="1198" height="358" rx="40" fill="url(#panel)"/>
 
-  <g transform="translate(24 18)">
-    <g class="ghost">
-      <rect x="0" y="0" width="144" height="144" rx="28" fill="#1c1f26" stroke="#3d4452" stroke-width="2"/>
-      <path d="M32 60 C32 50 40 42 50 42 H94 C104 42 112 50 112 60 V102 C112 106 109 109 105 109 H96 L86 122 L76 109 H68 L58 122 L48 109 H39 C35 109 32 106 32 102 Z" fill="#e0a370"/>
-      <g class="eyes">
-        <circle cx="56" cy="68" r="5.5" fill="#15171c"/>
-        <circle cx="88" cy="68" r="5.5" fill="#15171c"/>
+  <g clip-path="url(#card-clip)">
+    <rect x="1" y="1" width="1198" height="358" fill="url(#dots)"/>
+
+    <g transform="translate(300 180)">
+      <g class="glow">
+        <circle cx="0" cy="0" r="198" fill="url(#mascot-glow)"/>
       </g>
-      <path d="M62 88 L70 94 L62 100" fill="none" stroke="#15171c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-      <rect class="cursor" x="78" y="97" width="18" height="4" rx="2" fill="#15171c"/>
     </g>
+    <g transform="translate(300 334)">
+      <ellipse class="shadow" cx="0" cy="0" rx="126" ry="12" fill="url(#mascot-shadow)"/>
+    </g>
+
+    <path d="M40 74 V42 H72" fill="none" stroke="#e0a370" stroke-opacity="0.26" stroke-width="2" stroke-linecap="round"/>
+    <path d="M1160 286 V318 H1128" fill="none" stroke="#e0a370" stroke-opacity="0.26" stroke-width="2" stroke-linecap="round"/>
+
+    <g class="glyph glyph-a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="36" font-weight="600" fill="#e0a370">
+      <text x="108" y="126">&gt;</text>
+    </g>
+    <g class="glyph glyph-b" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="500" fill="#9aa3b2">
+      <text x="466" y="116">{ }</text>
+    </g>
+    <g class="glyph glyph-c" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="30" font-weight="600" fill="#e0a370">
+      <text x="456" y="300">&lt;/&gt;</text>
+    </g>
+
+    <g transform="translate(163 44) scale(1.9)">
+      <g class="float">
+        <rect x="0" y="0" width="144" height="144" rx="28" fill="#1c1f26" stroke="#3d4452" stroke-width="2"/>
+        <rect x="7" y="7" width="130" height="130" rx="22" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1.5"/>
+        <path d="M32 60 C32 50 40 42 50 42 H94 C104 42 112 50 112 60 V102 C112 106 109 109 105 109 H96 L86 122 L76 109 H68 L58 122 L48 109 H39 C35 109 32 106 32 102 Z" fill="#e0a370"/>
+        <g transform="translate(72 68)">
+          <g class="eyes">
+            <circle cx="-16" cy="0" r="5.5" fill="#15171c"/>
+            <circle cx="16" cy="0" r="5.5" fill="#15171c"/>
+          </g>
+        </g>
+        <path d="M62 88 L70 94 L62 100" fill="none" stroke="#15171c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect class="cursor" x="78" y="97" width="18" height="4" rx="2" fill="#15171c"/>
+      </g>
+    </g>
+
+    <text x="592" y="188" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="96" font-weight="700" fill="#e7e9ee" textLength="403" lengthAdjust="spacing">buka <tspan fill="#e0a370">ai</tspan></text>
+    <rect class="word-cursor" x="1026" y="130" width="16" height="58" rx="3" fill="#e0a370"/>
+    <text x="595" y="242" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" letter-spacing="4.2" fill="#9aa3b2">TERMINAL-NATIVE CODING AGENT</text>
   </g>
 
-  <text x="200" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="64" font-weight="700" fill="#e7e9ee">buka</text>
-  <text x="368" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="64" font-weight="700" fill="#e0a370">ai</text>
-  <rect x="456" y="48" width="16" height="50" rx="3" fill="#e0a370"/>
-  <text x="200" y="128" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="500" letter-spacing="2.5" fill="#9aa3b2">TERMINAL-NATIVE CODING AGENT</text>
+  <rect x="1" y="1" width="1198" height="358" rx="40" fill="none" stroke="#2b3038" stroke-width="2"/>
 </svg>
