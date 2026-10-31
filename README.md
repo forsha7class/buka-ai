@@ -147,26 +147,46 @@ buka -c                       # resume the latest session in this directory
 
 ## Installation
 
-`buka-ai` is not published to npm yet. Install from source:
+`buka` requires **Node.js 22 or newer**.
+
+Install with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/forsha7class/buka-ai/main/install.sh | bash
+```
+
+The installer downloads the latest source to `~/.buka-ai`, builds it, and puts
+`buka` on your `PATH` — `/usr/local/bin` when writable, otherwise
+`~/.local/bin`. Then:
+
+```bash
+buka --version
+buka
+```
+
+From a clone, run the installer in the checkout:
 
 ```bash
 git clone https://github.com/forsha7class/buka-ai.git
 cd buka-ai
-npm install
-npm run build
-npm link        # makes the `buka` command available globally
+./install.sh
 ```
 
-Verify the installation:
+The shell installer targets macOS and Linux; on Windows use Git Bash or WSL.
+
+To inspect the installer before running it:
 
 ```bash
-buka --version
+curl -fsSL https://raw.githubusercontent.com/forsha7class/buka-ai/main/install.sh -o install.sh
+less install.sh
+bash install.sh
 ```
 
-To uninstall the global link later:
+To uninstall:
 
 ```bash
-npm unlink -g buka-ai
+curl -fsSL https://raw.githubusercontent.com/forsha7class/buka-ai/main/install.sh | bash -s -- --uninstall
+rm -rf ~/.buka-ai
 ```
 
 ---

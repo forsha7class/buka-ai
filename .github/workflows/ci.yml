@@ -50,3 +50,30 @@ jobs:
         run: |
           node dist/cli.js --version
           node dist/cli.js --help > /dev/null
+
+  installer:
+    name: installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Syntax check
+        run: bash -n install.sh
+
+      - name: Install from checkout
+        run: |
+          export BUKA_BIN_DIR="$RUNNER_TEMP/bin"
+          ./install.sh
+          "$BUKA_BIN_DIR/buka" --version
+          "$BUKA_BIN_DIR/buka" --help > /dev/null
+
+      - name: Uninstall launcher
+        run: |
+          export BUKA_BIN_DIR="$RUNNER_TEMP/bin"
+          ./install.sh --uninstall
+          test ! -e "$BUKA_BIN_DIR/buka"

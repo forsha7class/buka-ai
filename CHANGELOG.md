@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One-command install.** `install.sh` installs from a clone or a `curl` pipe,
+  builds the project, and puts `buka` on `PATH`; `npm install` now builds
+  automatically through a `prepare` script. The README documents the one-line
+  install and uninstall paths.
 - **A split-pane shell.** On terminals 100 columns or wider a sidebar shows the
   session, model and wire name, a context-usage bar, the files the agent has
   changed, and the active key hints. Narrow terminals keep the single-column
